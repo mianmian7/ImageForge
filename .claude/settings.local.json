@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 todo_manager.py)",
+      "Bash(python3 -c \"import sys; print(sys.version)\")",
+      "Bash(python3 -c \"import tkinter; print(''tkinter available'')\")",
+      "Bash(sudo apt-get update)",
+      "Bash(sudo apt-get install -y python3-tk)",
+      "Bash(python3 -c \"import PyQt5; print(''PyQt5 available'')\")",
+      "Bash(python3 -c \"import wx; print(''wxPython available'')\")",
+      "Bash(mkdir -p gui core utils)",
+      "Bash(sudo apt update)",
+      "Bash(sudo apt install python3 python3-pip python3-venv python3-tk -y)",
+      "Bash(sudo apt install imagemagick libmagickwand-dev -y)"
+    ],
+    "deny": []
+  }
+}

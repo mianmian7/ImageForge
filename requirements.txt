@@ -1,0 +1,9 @@
+# Image processing
+Pillow>=9.0.0
+Wand>=0.6.0
+
+# HTTP requests
+requests>=2.25.0
+
+# Configuration
+configparser>=5.0.0
