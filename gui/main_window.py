@@ -37,6 +37,9 @@ class ImageProcessorGUI:
         self.processing_thread = None
         self.is_processing = False
         
+        # 处理结果缓存
+        self.processed_results = {}  # 存储输入路径到输出路径的映射
+        
         # 设置窗口图标和标题
         self.root.title("ImagePass - 图像处理器")
         self.setup_ui()
@@ -95,6 +98,20 @@ class ImageProcessorGUI:
         self.file_count_label = ttk.Label(file_frame, text="0/0")
         self.file_count_label.grid(row=0, column=5, padx=(10, 0))
         
+        # 递归选项
+        recursive_frame = ttk.Frame(file_frame)
+        recursive_frame.grid(row=1, column=0, columnspan=6, sticky=(tk.W, tk.E), pady=(5, 0))
+        
+        self.recursive_var = tk.BooleanVar(value=True)
+        recursive_check = ttk.Checkbutton(recursive_frame, text="递归读取子目录", 
+                                        variable=self.recursive_var,
+                                        command=self.on_recursive_change)
+        recursive_check.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.recursive_hint_label = ttk.Label(recursive_frame, text="(勾选后读取文件夹及其所有子文件夹中的图片)", 
+                                           foreground="gray", font=("Arial", 9))
+        self.recursive_hint_label.pack(side=tk.LEFT)
+        
         file_frame.columnconfigure(0, weight=1)
     
     def create_preview_area(self, parent):
@@ -114,6 +131,11 @@ class ImageProcessorGUI:
                                       relief=tk.SUNKEN, anchor=tk.CENTER)
         self.original_label.pack(fill=tk.BOTH, expand=True)
         
+        # 原图分辨率标签
+        self.original_resolution_label = ttk.Label(original_frame, text="", 
+                                                 foreground="gray", font=("Arial", 9))
+        self.original_resolution_label.pack(pady=(2, 0))
+        
         # 处理后预览
         processed_frame = ttk.LabelFrame(preview_container, text="处理后", padding="5")
         processed_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
@@ -121,6 +143,11 @@ class ImageProcessorGUI:
         self.processed_label = ttk.Label(processed_frame, text="等待处理", 
                                         relief=tk.SUNKEN, anchor=tk.CENTER)
         self.processed_label.pack(fill=tk.BOTH, expand=True)
+        
+        # 处理后分辨率标签
+        self.processed_resolution_label = ttk.Label(processed_frame, text="", 
+                                                  foreground="gray", font=("Arial", 9))
+        self.processed_resolution_label.pack(pady=(2, 0))
         
         preview_container.columnconfigure(0, weight=1)
         preview_container.columnconfigure(1, weight=1)
@@ -237,19 +264,125 @@ class ImageProcessorGUI:
         for widget in self.param_input_frame.winfo_children():
             widget.destroy()
         
-        ttk.Label(self.param_input_frame, text="宽度:").pack(side=tk.LEFT)
+        # 宽度和高度输入
+        size_frame = ttk.Frame(self.param_input_frame)
+        size_frame.pack(side=tk.TOP, pady=(0, 10))
+        
+        ttk.Label(size_frame, text="宽度:").pack(side=tk.LEFT)
         
         self.width_var = tk.StringVar(value="800")
-        width_spinbox = ttk.Spinbox(self.param_input_frame, from_=1, to=5000, 
+        width_spinbox = ttk.Spinbox(size_frame, from_=1, to=5000, 
                                    textvariable=self.width_var, width=10)
         width_spinbox.pack(side=tk.LEFT, padx=(5, 10))
         
-        ttk.Label(self.param_input_frame, text="高度:").pack(side=tk.LEFT)
+        ttk.Label(size_frame, text="高度:").pack(side=tk.LEFT)
         
         self.height_var = tk.StringVar(value="600")
-        height_spinbox = ttk.Spinbox(self.param_input_frame, from_=1, to=5000, 
+        height_spinbox = ttk.Spinbox(size_frame, from_=1, to=5000, 
                                     textvariable=self.height_var, width=10)
         height_spinbox.pack(side=tk.LEFT, padx=(5, 0))
+        
+        # 宽高比选项
+        aspect_frame = ttk.Frame(self.param_input_frame)
+        aspect_frame.pack(side=tk.TOP)
+        
+        self.maintain_aspect_var = tk.BooleanVar(value=True)
+        aspect_check = ttk.Checkbutton(aspect_frame, text="保持宽高比", 
+                                      variable=self.maintain_aspect_var,
+                                      command=self.on_aspect_ratio_change)
+        aspect_check.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # 提示标签
+        self.aspect_hint_label = ttk.Label(aspect_frame, text="(保持比例，图片可能不完全匹配指定尺寸)", 
+                                         foreground="gray", font=("Arial", 9))
+        self.aspect_hint_label.pack(side=tk.LEFT)
+    
+    def create_tinypng_params(self):
+        """创建TinyPNG压缩参数控件"""
+        # 清空现有控件
+        for widget in self.params_frame.winfo_children():
+            widget.destroy()
+        
+        # TinyPNG API密钥输入
+        api_key_frame = ttk.Frame(self.params_frame)
+        api_key_frame.pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Label(api_key_frame, text="API KEY:").pack(side=tk.LEFT, padx=(0, 5))
+        
+        # 获取当前的API密钥，如果没有则使用默认值
+        current_api_key = self.config.get_tinypng_api_key()
+        default_api_key = "4PGdmZhdCHG9NJ53VMl2kTZfcFCFTTNH"
+        api_key_value = current_api_key if current_api_key and current_api_key != 'your_tinypng_api_key_here' else default_api_key
+        
+        self.tinypng_api_key_var = tk.StringVar(value=api_key_value)
+        api_key_entry = ttk.Entry(api_key_frame, textvariable=self.tinypng_api_key_var, width=40)
+        api_key_entry.pack(side=tk.LEFT, padx=(5, 10))
+        
+        # 保存API密钥按钮
+        save_api_key_btn = ttk.Button(api_key_frame, text="保存", command=self.save_tinypng_api_key)
+        save_api_key_btn.pack(side=tk.LEFT)
+        
+        # API密钥状态标签
+        self.api_key_status_label = ttk.Label(api_key_frame, text="", foreground="gray", font=("Arial", 9))
+        self.api_key_status_label.pack(side=tk.LEFT, padx=(10, 0))
+        
+        # 更新API密钥状态
+        self.update_api_key_status()
+    
+    def update_api_key_status(self):
+        """更新API密钥状态"""
+        api_key = self.tinypng_api_key_var.get() if hasattr(self, 'tinypng_api_key_var') else ''
+        if api_key:
+            if api_key == "4PGdmZhdCHG9NJ53VMl2kTZfcFCFTTNH":
+                status_text = "(使用默认API密钥)"
+                color = "green"
+            else:
+                status_text = "(自定义API密钥)"
+                color = "blue"
+        else:
+            status_text = "(未设置API密钥)"
+            color = "red"
+        
+        if hasattr(self, 'api_key_status_label'):
+            self.api_key_status_label.config(text=status_text, foreground=color)
+    
+    def save_tinypng_api_key(self):
+        """保存TinyPNG API密钥"""
+        if not hasattr(self, 'tinypng_api_key_var'):
+            return
+        
+        api_key = self.tinypng_api_key_var.get().strip()
+        
+        # 验证API密钥格式（基本验证）
+        if len(api_key) < 10:
+            messagebox.showerror("API密钥错误", "API密钥长度不足，请检查输入")
+            return
+        
+        try:
+            # 保存到配置
+            self.config.set_tinypng_api_key(api_key)
+            self.config.save_config()
+            
+            # 更新处理器的API密钥
+            self.processor.set_tinypng_api_key(api_key)
+            
+            # 验证API密钥
+            if self.processor.validate_tinypng_api_key(api_key):
+                messagebox.showinfo("保存成功", "API密钥保存成功且验证通过")
+                self.api_key_status_label.config(text="(API密钥有效)", foreground="green")
+            else:
+                messagebox.showwarning("保存成功", "API密钥已保存，但验证失败，请检查网络连接或密钥正确性")
+                self.api_key_status_label.config(text="(API密钥验证失败)", foreground="orange")
+                
+        except Exception as e:
+            messagebox.showerror("保存失败", f"保存API密钥失败: {str(e)}")
+    
+    def on_aspect_ratio_change(self):
+        """处理宽高比选项变更"""
+        if self.maintain_aspect_var.get():
+            self.aspect_hint_label.config(text="(保持比例，图片可能不完全匹配指定尺寸)")
+        else:
+            self.aspect_hint_label.config(text="(强制调整，图片将完全匹配指定尺寸，可能变形)")
     
     def create_status_bar(self, parent):
         """创建状态栏"""
@@ -281,6 +414,8 @@ class ImageProcessorGUI:
         )
         
         if file_path:
+            # 清空处理结果缓存，因为选择了新的文件
+            self.processed_results.clear()
             self.load_image(file_path)
     
     def select_directory(self):
@@ -288,15 +423,56 @@ class ImageProcessorGUI:
         directory_path = filedialog.askdirectory(title="选择包含图片的文件夹")
         
         if directory_path:
-            files = self.file_manager.select_directory(directory_path)
+            recursive = self.recursive_var.get()
+            files = self.file_manager.select_directory(directory_path, recursive)
             if files:
+                # 清空处理结果缓存，因为选择了新的文件集
+                self.processed_results.clear()
+                
                 self.load_image(files[0])
                 self.update_navigation_buttons()
                 self.update_file_count_label()
                 self.batch_process_btn.config(state=tk.NORMAL)
-                self.status_label.config(text=f"已加载 {len(files)} 个图片文件")
+                recursive_text = "及其子目录" if recursive else ""
+                self.status_label.config(text=f"已加载 {len(files)} 个图片文件{recursive_text}")
             else:
                 messagebox.showwarning("无图片文件", "所选文件夹中没有找到支持的图片文件")
+    
+    def on_recursive_change(self):
+        """处理递归选项变更"""
+        if self.recursive_var.get():
+            self.recursive_hint_label.config(text="(勾选后读取文件夹及其所有子文件夹中的图片)")
+        else:
+            self.recursive_hint_label.config(text="(取消勾选后只读取当前文件夹中的图片)")
+        
+        # 如果已经有文件夹选择，重新加载文件并清空缓存
+        if self.file_manager.current_directory:
+            recursive = self.recursive_var.get()
+            files = self.file_manager.select_directory(self.file_manager.current_directory, recursive)
+            if files:
+                # 清空处理结果缓存
+                self.processed_results.clear()
+                
+                self.load_image(files[0])
+                self.update_navigation_buttons()
+                self.update_file_count_label()
+                recursive_text = "及其子目录" if recursive else ""
+                self.status_label.config(text=f"已重新加载 {len(files)} 个图片文件{recursive_text}")
+            else:
+                # 没有文件时清空显示
+                self.processed_results.clear()
+                self.current_image_path = ""
+                self.file_path_var.set("")
+                self.original_label.config(image='', text="请选择图片文件")
+                self.original_resolution_label.config(text="")
+                self.processed_label.config(image='', text="等待处理")
+                self.processed_resolution_label.config(text="")
+                self.process_btn.config(state=tk.DISABLED)
+                self.prev_btn.config(state=tk.DISABLED)
+                self.next_btn.config(state=tk.DISABLED)
+                self.file_count_label.config(text="0/0")
+                self.batch_process_btn.config(state=tk.DISABLED)
+                self.status_label.config(text="所选文件夹中没有找到支持的图片文件")
     
     def load_image(self, image_path):
         """加载图片"""
@@ -307,9 +483,23 @@ class ImageProcessorGUI:
             # 显示原图
             self.display_image(image_path, self.original_label)
             
-            # 清空处理后预览
-            self.processed_label.config(image='', text="等待处理")
-            self.processed_image_tk = None
+            # 检查是否有对应的处理结果
+            if image_path in self.processed_results:
+                processed_path = self.processed_results[image_path]
+                if os.path.exists(processed_path):
+                    self.display_image(processed_path, self.processed_label)
+                else:
+                    # 处理结果文件不存在，清空预览
+                    self.processed_label.config(image='', text="处理结果文件不存在")
+                    self.processed_image_tk = None
+                    self.processed_resolution_label.config(text="")
+                    # 从缓存中移除
+                    del self.processed_results[image_path]
+            else:
+                # 没有处理结果，清空预览
+                self.processed_label.config(image='', text="等待处理")
+                self.processed_image_tk = None
+                self.processed_resolution_label.config(text="")
             
             # 启用处理按钮
             self.process_btn.config(state=tk.NORMAL)
@@ -319,6 +509,31 @@ class ImageProcessorGUI:
             
         except Exception as e:
             messagebox.showerror("加载失败", f"无法加载图片: {str(e)}")
+    
+    def get_image_info_text(self, image_path):
+        """获取图片信息文本（分辨率和文件大小）"""
+        try:
+            resolution = "未知分辨率"
+            file_size = "未知大小"
+            
+            # 使用ImageMagick获取图片信息
+            image_info = self.processor.get_image_info(image_path)
+            if image_info and 'width' in image_info and 'height' in image_info:
+                resolution = f"{image_info['width']} × {image_info['height']}"
+            
+            # 获取文件大小
+            if os.path.exists(image_path):
+                size_bytes = os.path.getsize(image_path)
+                if size_bytes < 1024:
+                    file_size = f"{size_bytes} B"
+                elif size_bytes < 1024 * 1024:
+                    file_size = f"{size_bytes // 1024} KB"
+                else:
+                    file_size = f"{size_bytes // (1024 * 1024):.1f} MB"
+            
+            return f"{resolution} | {file_size}"
+        except Exception:
+            return "信息获取失败"
     
     def display_image(self, image_path, label_widget):
         """在指定标签中显示图片"""
@@ -351,9 +566,21 @@ class ImageProcessorGUI:
                 self.current_image_tk = tk_image
             else:
                 self.processed_image_tk = tk_image
+            
+            # 更新图片信息显示（分辨率和文件大小）
+            info_text = self.get_image_info_text(image_path)
+            if label_widget == self.original_label:
+                self.original_resolution_label.config(text=info_text)
+            else:
+                self.processed_resolution_label.config(text=info_text)
                 
         except Exception as e:
             label_widget.config(image='', text=f"显示错误: {str(e)}")
+            # 清空信息显示
+            if label_widget == self.original_label:
+                self.original_resolution_label.config(text="")
+            else:
+                self.processed_resolution_label.config(text="")
     
     def show_previous_image(self):
         """显示上一张图片"""
@@ -390,6 +617,8 @@ class ImageProcessorGUI:
         process_type = self.process_type_var.get()
         if process_type == "resize":
             self.create_resize_params()
+        elif process_type == "compress":
+            self.create_tinypng_params()
         else:
             # 清空参数区域
             for widget in self.params_frame.winfo_children():
@@ -431,11 +660,31 @@ class ImageProcessorGUI:
                 height = int(self.height_var.get())
                 resize_value = (width, height)
             
-            return {
+            params = {
                 'resize_mode': resize_mode,
                 'resize_value': resize_value,
                 'quality': 85
             }
+            
+            # 添加宽高比参数（仅在指定尺寸模式下有效）
+            if resize_mode == "dimensions":
+                params['maintain_aspect'] = self.maintain_aspect_var.get()
+            
+            return params
+        elif process_type == "compress":
+            # 确保API密钥已设置
+            if hasattr(self, 'tinypng_api_key_var'):
+                api_key = self.tinypng_api_key_var.get().strip()
+                if api_key:
+                    # 更新处理器的API密钥
+                    self.processor.set_tinypng_api_key(api_key)
+                    return {}
+                else:
+                    messagebox.showerror("API密钥错误", "请先输入TinyPNG API密钥")
+                    return None
+            else:
+                messagebox.showerror("API密钥错误", "请先输入TinyPNG API密钥")
+                return None
         else:
             return {}
     
@@ -450,6 +699,9 @@ class ImageProcessorGUI:
         
         # 获取处理参数
         process_params = self.get_process_params()
+        if process_params is None:
+            # API密钥验证失败，停止处理
+            return
         
         # 在新线程中处理图片
         self.processing_thread = threading.Thread(
@@ -502,6 +754,9 @@ class ImageProcessorGUI:
     def on_process_complete(self, result, output_path):
         """处理完成时的回调"""
         if result['success']:
+            # 保存处理结果到缓存
+            self.processed_results[self.current_image_path] = output_path
+            
             # 显示处理后的图片
             self.display_image(output_path, self.processed_label)
             
@@ -541,6 +796,12 @@ class ImageProcessorGUI:
             messagebox.showwarning("正在处理", "请等待当前处理完成")
             return
         
+        # 获取处理参数
+        process_params = self.get_process_params()
+        if process_params is None:
+            # API密钥验证失败，停止处理
+            return
+        
         # 确认批量处理
         result = messagebox.askyesno(
             "确认批量处理", 
@@ -548,9 +809,6 @@ class ImageProcessorGUI:
         )
         
         if result:
-            # 获取处理参数
-            process_params = self.get_process_params()
-            
             # 设置进度回调
             self.processor.set_processing_callback(self.on_batch_progress)
             
@@ -605,11 +863,34 @@ class ImageProcessorGUI:
         success_count = sum(1 for r in results if r['success'])
         total_count = len(results)
         
+        # 保存所有成功的处理结果到缓存
+        for result in results:
+            if result['success'] and result.get('output_path') and result.get('input_path'):
+                self.processed_results[result['input_path']] = result['output_path']
+        
         summary = f"批量处理完成! 成功: {success_count}/{total_count}"
         if success_count < total_count:
             summary += f", 失败: {total_count - success_count}"
         
         self.status_label.config(text=summary)
+        
+        # 找到第一个成功处理的文件并在预览窗口中显示
+        for result in results:
+            if result['success'] and result.get('output_path'):
+                try:
+                    # 如果当前显示的原图与这个处理结果匹配，则显示处理后的图片
+                    if (self.current_image_path and 
+                        result['input_path'] == self.current_image_path):
+                        self.display_image(result['output_path'], self.processed_label)
+                    elif not self.current_image_path:
+                        # 如果没有当前图片，加载第一个成功处理的原图并显示结果
+                        self.load_image(result['input_path'])
+                        self.display_image(result['output_path'], self.processed_label)
+                    break
+                except Exception as e:
+                    print(f"无法显示处理结果: {e}")
+                    continue
+        
         messagebox.showinfo("批量处理完成", summary)
     
     def on_batch_process_error(self, error_message):

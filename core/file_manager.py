@@ -38,8 +38,16 @@ class FileManager:
             return file_path
         return None
     
-    def select_directory(self, directory_path: str) -> List[str]:
-        """选择目录并获取所有支持的图片文件"""
+    def select_directory(self, directory_path: str, recursive: bool = True) -> List[str]:
+        """选择目录并获取所有支持的图片文件
+        
+        Args:
+            directory_path: 目录路径
+            recursive: 是否递归读取子目录
+            
+        Returns:
+            list: 图片文件路径列表
+        """
         if not os.path.isdir(directory_path):
             return []
         
@@ -47,10 +55,18 @@ class FileManager:
         self.current_files = []
         
         # 遍历目录查找图片文件
-        for root, dirs, files in os.walk(directory_path):
-            for file in files:
-                file_path = os.path.join(root, file)
-                if self.is_image_file(file_path):
+        if recursive:
+            # 递归遍历所有子目录
+            for root, dirs, files in os.walk(directory_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    if self.is_image_file(file_path):
+                        self.current_files.append(file_path)
+        else:
+            # 只遍历当前目录
+            for file in os.listdir(directory_path):
+                file_path = os.path.join(directory_path, file)
+                if os.path.isfile(file_path) and self.is_image_file(file_path):
                     self.current_files.append(file_path)
         
         self.current_files.sort()

@@ -42,7 +42,7 @@ class ImageProcessor:
     
     def resize_image(self, input_path: str, output_path: str, 
                     resize_mode: str, resize_value, 
-                    quality: int = 85) -> Dict[str, Any]:
+                    quality: int = 85, maintain_aspect: bool = True) -> Dict[str, Any]:
         """调整图片大小
         
         Args:
@@ -51,6 +51,7 @@ class ImageProcessor:
             resize_mode: 调整模式 ('percentage' 或 'dimensions')
             resize_value: 调整值 (百分比或尺寸)
             quality: 图片质量
+            maintain_aspect: 是否保持宽高比 (True=保持比例，False=强制调整)
             
         Returns:
             dict: 处理结果
@@ -77,11 +78,11 @@ class ImageProcessor:
                 if isinstance(resize_value, (tuple, list)) and len(resize_value) == 2:
                     width, height = resize_value
                     success = self.imagemagick.resize_by_dimensions(
-                        input_path, output_path, width, height, True, quality
+                        input_path, output_path, width, height, maintain_aspect, quality
                     )
                 else:
                     success = self.imagemagick.resize_by_dimensions(
-                        input_path, output_path, resize_value, None, True, quality
+                        input_path, output_path, resize_value, None, maintain_aspect, quality
                     )
             else:
                 return {
@@ -158,7 +159,8 @@ class ImageProcessor:
                     input_path, output_path,
                     process_params.get('resize_mode', 'percentage'),
                     process_params.get('resize_value', 50),
-                    process_params.get('quality', 85)
+                    process_params.get('quality', 85),
+                    process_params.get('maintain_aspect', True)
                 )
             elif process_type == 'compress':
                 return self.compress_image_tinypng(input_path, output_path)

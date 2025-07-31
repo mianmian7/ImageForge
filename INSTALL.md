@@ -3,55 +3,52 @@
 ## 系统要求
 - Python 3.8+
 - Linux/Windows/macOS
-- ImageMagick
+- ImageMagick (可选，程序会自动使用Pillow作为备用方案)
 
 ## 安装步骤
 
 ### 1. 安装系统依赖
 
-#### Ubuntu/Debian 系统
+#### 必需依赖
 ```bash
-# 更新包管理器
+# Ubuntu/Debian 系统
 sudo apt update
-
-# 安装Python和venv
 sudo apt install python3 python3-pip python3-venv
 
-# 安装ImageMagick
-sudo apt install imagemagick
-
-# 验证ImageMagick安装
-magick --version
-```
-
-#### CentOS/RHEL 系统
-```bash
-# 安装Python和pip
+# CentOS/RHEL 系统
 sudo yum install python3 python3-pip
 
-# 安装ImageMagick
-sudo yum install ImageMagick
-
-# 验证ImageMagick安装
-magick --version
-```
-
-#### macOS 系统
-```bash
-# 使用Homebrew安装Python
+# macOS 系统
 brew install python
 
-# 安装ImageMagick
-brew install imagemagick
+# Windows 系统
+从Python官网安装Python 3.8+
+```
 
-# 验证ImageMagick安装
+#### 可选依赖 - ImageMagick (推荐)
+如果系统安装了ImageMagick，程序会优先使用ImageMagick进行图片处理。如果没有安装ImageMagick，程序会自动使用Pillow作为备用方案。
+
+**Ubuntu/Debian 系统**
+```bash
+sudo apt install imagemagick
 magick --version
 ```
 
-#### Windows 系统
-1. 从Python官网安装Python 3.8+
-2. 从ImageMagick官网安装ImageMagick
-3. 确保将Python和ImageMagick添加到系统PATH
+**CentOS/RHEL 系统**
+```bash
+sudo yum install ImageMagick
+magick --version
+```
+
+**macOS 系统**
+```bash
+brew install imagemagick
+magick --version
+```
+
+**Windows 系统**
+1. 从ImageMagick官网安装ImageMagick
+2. 确保将ImageMagick添加到系统PATH
 
 ### 2. 创建虚拟环境
 ```bash
@@ -91,12 +88,18 @@ pip install -r requirements.txt
 # 设置你的TinyPNG API密钥
 tinypng_api_key = your_actual_api_key_here
 
-# 根据系统设置ImageMagick路径
+# ImageMagick路径 (可选)
+# 如果未安装ImageMagick，程序会自动使用Pillow作为备用方案
 # Linux通常在: /usr/bin/magick
 # macOS通常在: /usr/local/bin/magick
 # Windows通常在: C:\\Program Files\\ImageMagick\\magick.exe
 imagemagick_path = /usr/bin/magick
 ```
+
+**注意**: 
+- 如果ImageMagick不可用，程序会自动使用Pillow进行图片处理
+- Pillow已经包含在requirements.txt中，无需额外安装
+- 所有功能（图片调整、格式转换、优化）在两种处理器下都正常工作
 
 ### 5. 运行程序
 ```bash
@@ -125,15 +128,17 @@ brew install python-tk
 **现象**: `wand.exceptions.WandException` 或 `MagickWand not found`
 
 **解决方案**:
+程序现在支持自动备用方案，即使ImageMagick不可用也能正常工作：
+
 ```bash
-# 确认ImageMagick安装路径
-which magick
+# 检查程序是否能正常运行
+python main.py
 
-# 如果找不到，重新安装ImageMagick
-# Ubuntu/Debian
-sudo apt install --reinstall imagemagick
-
-# 或者从源码编译安装
+# 程序会自动检测并使用Pillow作为备用处理器
+# 如果仍然希望使用ImageMagick：
+sudo apt install --reinstall imagemagick  # Ubuntu/Debian
+sudo yum install ImageMagick              # CentOS/RHEL
+brew install imagemagick                   # macOS
 ```
 
 ### 问题3: Wand安装失败
@@ -179,20 +184,29 @@ pip install --user -r requirements.txt
 python -c "
 import tkinter
 from PIL import Image
-from wand.image import Image as WandImage
 import requests
 import configparser
-print('所有依赖安装成功!')
+print('基础依赖安装成功!')
 "
 ```
 
-### 检查ImageMagick
+### 检查图片处理器
 ```bash
 python -c "
-from wand.image import Image as WandImage
-print('ImageMagick集成成功!')
+from utils.imagemagick_wrapper import ImageMagickWrapper
+wrapper = ImageMagickWrapper()
+info = wrapper.get_processor_info()
+print(f'当前处理器: {info[\"processor\"]}')
+print(f'ImageMagick可用: {info[\"imagemagick_available\"]}')
+print(f'Pillow可用: {info[\"pillow_available\"]}')
+print(f'备用方案可用: {info[\"has_fallback\"]}')
 "
 ```
+
+这个命令会显示当前使用的图片处理器以及各库的可用性。程序会自动选择最佳处理器：
+- 如果ImageMagick可用，会优先使用ImageMagick
+- 如果ImageMagick不可用，会自动使用Pillow作为备用方案
+- 两种方案都支持完整的图片处理功能
 
 ### 检查TinyPNG API
 ```python
@@ -211,11 +225,23 @@ py-ImagePass/
 ├── main.py                 # 主程序
 ├── requirements.txt        # Python依赖
 ├── config.ini             # 配置文件
+├── test_fallback.py       # 备用方案测试脚本
 ├── todo.md                # 开发计划
 ├── gui/                   # GUI模块
 ├── core/                  # 核心模块
+│   ├── image_processor.py # 图片处理核心
+│   ├── file_manager.py    # 文件管理
+│   └── config.py          # 配置管理
 └── utils/                 # 工具模块
+    ├── imagemagick_wrapper.py  # ImageMagick封装（含Pillow备用）
+    ├── pillow_wrapper.py       # Pillow图片处理封装
+    └── tinypng_client.py       # TinyPNG客户端
 ```
+
+**新增功能**:
+- `utils/pillow_wrapper.py`: 新增的Pillow图片处理封装，作为ImageMagick的备用方案
+- `utils/imagemagick_wrapper.py`: 更新后的ImageMagick封装，支持自动检测和备用方案切换
+- `test_fallback.py`: 用于测试备用方案的脚本
 
 ## 开始使用
 

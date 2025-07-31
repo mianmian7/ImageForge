@@ -1,20 +1,46 @@
 """
 ImageMagick封装模块
 提供图片分辨率调整功能
+支持ImageMagick不可用时自动切换到Pillow
 """
 
 import os
-from wand.image import Image
-from wand.exceptions import WandException
 from typing import Tuple, Optional
 
+try:
+    from wand.image import Image
+    from wand.exceptions import WandException
+    IMAGEMAGICK_AVAILABLE = True
+except ImportError:
+    IMAGEMAGICK_AVAILABLE = False
+    Image = None
+    WandException = Exception
+
+# 尝试导入Pillow作为备用
+try:
+    from .pillow_wrapper import PillowWrapper
+    PILLOW_AVAILABLE = True
+except ImportError:
+    PILLOW_AVAILABLE = False
+    PillowWrapper = None
+
 class ImageMagickWrapper:
-    """ImageMagick操作封装类"""
+    """ImageMagick操作封装类，支持Pillow作为备用方案"""
     
     def __init__(self, imagemagick_path=None):
         """初始化ImageMagick封装器"""
         self.imagemagick_path = imagemagick_path
         self.last_error = None
+        
+        # 初始化备用处理器
+        if IMAGEMAGICK_AVAILABLE:
+            self.processor = "imagemagick"
+        elif PILLOW_AVAILABLE:
+            self.processor = "pillow"
+            self._pillow_wrapper = PillowWrapper()
+        else:
+            self.processor = "none"
+            self.last_error = "ImageMagick和Pillow都不可用"
     
     def resize_by_percentage(self, input_path: str, output_path: str, 
                            percentage: float, quality: int = 85) -> bool:
@@ -29,28 +55,38 @@ class ImageMagickWrapper:
         Returns:
             bool: 处理是否成功
         """
-        try:
-            with Image(filename=input_path) as img:
-                # 计算新尺寸
-                new_width = int(img.width * percentage / 100)
-                new_height = int(img.height * percentage / 100)
+        if self.processor == "imagemagick":
+            try:
+                with Image(filename=input_path) as img:
+                    # 计算新尺寸
+                    new_width = int(img.width * percentage / 100)
+                    new_height = int(img.height * percentage / 100)
+                    
+                    # 调整大小
+                    img.resize(new_width, new_height)
+                    
+                    # 设置质量
+                    img.compression_quality = quality
+                    
+                    # 保存图片
+                    img.save(filename=output_path)
+                    
+                return True
                 
-                # 调整大小
-                img.resize(new_width, new_height)
+            except WandException as e:
+                self.last_error = f"ImageMagick处理失败: {str(e)}"
+                return False
+            except Exception as e:
+                self.last_error = f"未知错误: {str(e)}"
+                return False
                 
-                # 设置质量
-                img.compression_quality = quality
-                
-                # 保存图片
-                img.save(filename=output_path)
-                
-            return True
+        elif self.processor == "pillow":
+            result = self._pillow_wrapper.resize_by_percentage(input_path, output_path, percentage, quality)
+            self.last_error = self._pillow_wrapper.get_last_error()
+            return result
             
-        except WandException as e:
-            self.last_error = f"ImageMagick处理失败: {str(e)}"
-            return False
-        except Exception as e:
-            self.last_error = f"未知错误: {str(e)}"
+        else:
+            self.last_error = "没有可用的图片处理器"
             return False
     
     def resize_by_dimensions(self, input_path: str, output_path: str, 
@@ -70,44 +106,59 @@ class ImageMagickWrapper:
         Returns:
             bool: 处理是否成功
         """
-        try:
-            with Image(filename=input_path) as img:
-                original_width = img.width
-                original_height = img.height
+        if self.processor == "imagemagick":
+            try:
+                with Image(filename=input_path) as img:
+                    original_width = img.width
+                    original_height = img.height
+                    
+                    if maintain_aspect:
+                        if height is None:
+                            # 只指定宽度，按比例计算高度
+                            ratio = width / original_width
+                            height = int(original_height * ratio)
+                        elif width is None:
+                            # 只指定高度，按比例计算宽度
+                            ratio = height / original_height
+                            width = int(original_width * ratio)
+                        else:
+                            # 指定宽高，根据maintain_aspect参数选择处理方式
+                            if maintain_aspect:
+                                # 保持宽高比，选择较小的比例确保图片适应目标尺寸
+                                width_ratio = width / original_width
+                                height_ratio = height / original_height
+                                ratio = min(width_ratio, height_ratio)
+                                width = int(original_width * ratio)
+                                height = int(original_height * ratio)
+                            else:
+                                # 不保持宽高比，强制调整到指定尺寸
+                                pass
+                    
+                    # 调整大小
+                    img.resize(width, height)
+                    
+                    # 设置质量
+                    img.compression_quality = quality
+                    
+                    # 保存图片
+                    img.save(filename=output_path)
+                    
+                return True
                 
-                if maintain_aspect:
-                    if height is None:
-                        # 只指定宽度，按比例计算高度
-                        ratio = width / original_width
-                        height = int(original_height * ratio)
-                    elif width is None:
-                        # 只指定高度，按比例计算宽度
-                        ratio = height / original_height
-                        width = int(original_width * ratio)
-                    else:
-                        # 指定宽高，选择保持比例的缩放方式
-                        width_ratio = width / original_width
-                        height_ratio = height / original_height
-                        ratio = min(width_ratio, height_ratio)
-                        width = int(original_width * ratio)
-                        height = int(original_height * ratio)
+            except WandException as e:
+                self.last_error = f"ImageMagick处理失败: {str(e)}"
+                return False
+            except Exception as e:
+                self.last_error = f"未知错误: {str(e)}"
+                return False
                 
-                # 调整大小
-                img.resize(width, height)
-                
-                # 设置质量
-                img.compression_quality = quality
-                
-                # 保存图片
-                img.save(filename=output_path)
-                
-            return True
+        elif self.processor == "pillow":
+            result = self._pillow_wrapper.resize_by_dimensions(input_path, output_path, width, height, maintain_aspect, quality)
+            self.last_error = self._pillow_wrapper.get_last_error()
+            return result
             
-        except WandException as e:
-            self.last_error = f"ImageMagick处理失败: {str(e)}"
-            return False
-        except Exception as e:
-            self.last_error = f"未知错误: {str(e)}"
+        else:
+            self.last_error = "没有可用的图片处理器"
             return False
     
     def get_image_info(self, image_path: str) -> Optional[dict]:
@@ -119,17 +170,27 @@ class ImageMagickWrapper:
         Returns:
             dict: 图片信息字典
         """
-        try:
-            with Image(filename=image_path) as img:
-                return {
-                    'width': img.width,
-                    'height': img.height,
-                    'format': img.format,
-                    'filesize': os.path.getsize(image_path),
-                    'resolution': img.resolution
-                }
-        except Exception as e:
-            self.last_error = f"获取图片信息失败: {str(e)}"
+        if self.processor == "imagemagick":
+            try:
+                with Image(filename=image_path) as img:
+                    return {
+                        'width': img.width,
+                        'height': img.height,
+                        'format': img.format,
+                        'filesize': os.path.getsize(image_path),
+                        'resolution': img.resolution
+                    }
+            except Exception as e:
+                self.last_error = f"获取图片信息失败: {str(e)}"
+                return None
+                
+        elif self.processor == "pillow":
+            result = self._pillow_wrapper.get_image_info(image_path)
+            self.last_error = self._pillow_wrapper.get_last_error()
+            return result
+            
+        else:
+            self.last_error = "没有可用的图片处理器"
             return None
     
     def convert_format(self, input_path: str, output_path: str, 
@@ -145,14 +206,24 @@ class ImageMagickWrapper:
         Returns:
             bool: 转换是否成功
         """
-        try:
-            with Image(filename=input_path) as img:
-                img.format = output_format
-                img.compression_quality = quality
-                img.save(filename=output_path)
-            return True
-        except Exception as e:
-            self.last_error = f"格式转换失败: {str(e)}"
+        if self.processor == "imagemagick":
+            try:
+                with Image(filename=input_path) as img:
+                    img.format = output_format
+                    img.compression_quality = quality
+                    img.save(filename=output_path)
+                return True
+            except Exception as e:
+                self.last_error = f"格式转换失败: {str(e)}"
+                return False
+                
+        elif self.processor == "pillow":
+            result = self._pillow_wrapper.convert_format(input_path, output_path, output_format, quality)
+            self.last_error = self._pillow_wrapper.get_last_error()
+            return result
+            
+        else:
+            self.last_error = "没有可用的图片处理器"
             return False
     
     def optimize_image(self, input_path: str, output_path: str, 
@@ -167,18 +238,28 @@ class ImageMagickWrapper:
         Returns:
             bool: 优化是否成功
         """
-        try:
-            with Image(filename=input_path) as img:
-                # 保持原尺寸，只优化质量
-                img.compression_quality = quality
+        if self.processor == "imagemagick":
+            try:
+                with Image(filename=input_path) as img:
+                    # 保持原尺寸，只优化质量
+                    img.compression_quality = quality
+                    
+                    # 应用一些优化
+                    img.strip()  # 移除元数据
+                    
+                    img.save(filename=output_path)
+                return True
+            except Exception as e:
+                self.last_error = f"图片优化失败: {str(e)}"
+                return False
                 
-                # 应用一些优化
-                img.strip()  # 移除元数据
-                
-                img.save(filename=output_path)
-            return True
-        except Exception as e:
-            self.last_error = f"图片优化失败: {str(e)}"
+        elif self.processor == "pillow":
+            result = self._pillow_wrapper.optimize_image(input_path, output_path, quality)
+            self.last_error = self._pillow_wrapper.get_last_error()
+            return result
+            
+        else:
+            self.last_error = "没有可用的图片处理器"
             return False
     
     def get_last_error(self) -> str:
@@ -187,8 +268,13 @@ class ImageMagickWrapper:
     
     def is_imagemagick_available(self) -> bool:
         """检查ImageMagick是否可用"""
-        try:
-            import wand
-            return True
-        except ImportError:
-            return False
+        return self.processor == "imagemagick"
+    
+    def get_processor_info(self) -> dict:
+        """获取当前使用的图片处理器信息"""
+        return {
+            'processor': self.processor,
+            'imagemagick_available': IMAGEMAGICK_AVAILABLE,
+            'pillow_available': PILLOW_AVAILABLE,
+            'has_fallback': PILLOW_AVAILABLE
+        }
