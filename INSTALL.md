@@ -3,7 +3,6 @@
 ## 系统要求
 - Python 3.8+
 - Linux/Windows/macOS
-- ImageMagick (可选，程序会自动使用Pillow作为备用方案)
 
 ## 安装步骤
 
@@ -25,30 +24,6 @@ brew install python
 从Python官网安装Python 3.8+
 ```
 
-#### 可选依赖 - ImageMagick (推荐)
-如果系统安装了ImageMagick，程序会优先使用ImageMagick进行图片处理。如果没有安装ImageMagick，程序会自动使用Pillow作为备用方案。
-
-**Ubuntu/Debian 系统**
-```bash
-sudo apt install imagemagick
-magick --version
-```
-
-**CentOS/RHEL 系统**
-```bash
-sudo yum install ImageMagick
-magick --version
-```
-
-**macOS 系统**
-```bash
-brew install imagemagick
-magick --version
-```
-
-**Windows 系统**
-1. 从ImageMagick官网安装ImageMagick
-2. 确保将ImageMagick添加到系统PATH
 
 ### 2. 创建虚拟环境
 ```bash
@@ -88,18 +63,12 @@ pip install -r requirements.txt
 # 设置你的TinyPNG API密钥
 tinypng_api_key = your_actual_api_key_here
 
-# ImageMagick路径 (可选)
-# 如果未安装ImageMagick，程序会自动使用Pillow作为备用方案
-# Linux通常在: /usr/bin/magick
-# macOS通常在: /usr/local/bin/magick
-# Windows通常在: C:\\Program Files\\ImageMagick\\magick.exe
-imagemagick_path = /usr/bin/magick
 ```
 
 **注意**: 
-- 如果ImageMagick不可用，程序会自动使用Pillow进行图片处理
+- 程序使用Pillow进行图片处理
 - Pillow已经包含在requirements.txt中，无需额外安装
-- 所有功能（图片调整、格式转换、优化）在两种处理器下都正常工作
+- 所有功能（图片调整、格式转换、优化）都正常工作
 
 ### 5. 运行程序
 ```bash
@@ -124,40 +93,8 @@ sudo yum install tkinter
 brew install python-tk
 ```
 
-### 问题2: ImageMagick未找到
-**现象**: `wand.exceptions.WandException` 或 `MagickWand not found`
 
-**解决方案**:
-程序现在支持自动备用方案，即使ImageMagick不可用也能正常工作：
-
-```bash
-# 检查程序是否能正常运行
-python main.py
-
-# 程序会自动检测并使用Pillow作为备用处理器
-# 如果仍然希望使用ImageMagick：
-sudo apt install --reinstall imagemagick  # Ubuntu/Debian
-sudo yum install ImageMagick              # CentOS/RHEL
-brew install imagemagick                   # macOS
-```
-
-### 问题3: Wand安装失败
-**现象**: 安装Wand时出现编译错误
-
-**解决方案**:
-```bash
-# 安装ImageMagick开发库
-# Ubuntu/Debian
-sudo apt install libmagickwand-dev
-
-# CentOS/RHEL
-sudo yum install ImageMagick-devel
-
-# 然后重新安装Wand
-pip install wand
-```
-
-### 问题4: 权限错误
+### 问题2: 权限错误
 **现象**: `Permission denied` 错误
 
 **解决方案**:
@@ -169,7 +106,7 @@ source venv/bin/activate
 pip install --user -r requirements.txt
 ```
 
-### 问题5: TinyPNG API调用失败
+### 问题3: TinyPNG API调用失败
 **现象**: 网络相关错误或认证失败
 
 **解决方案**:
@@ -193,20 +130,13 @@ print('基础依赖安装成功!')
 ### 检查图片处理器
 ```bash
 python -c "
-from utils.imagemagick_wrapper import ImageMagickWrapper
-wrapper = ImageMagickWrapper()
-info = wrapper.get_processor_info()
-print(f'当前处理器: {info[\"processor\"]}')
-print(f'ImageMagick可用: {info[\"imagemagick_available\"]}')
-print(f'Pillow可用: {info[\"pillow_available\"]}')
-print(f'备用方案可用: {info[\"has_fallback\"]}')
+from utils.pillow_wrapper import PillowWrapper
+wrapper = PillowWrapper()
+print('Pillow图片处理器已启用')
 "
 ```
 
-这个命令会显示当前使用的图片处理器以及各库的可用性。程序会自动选择最佳处理器：
-- 如果ImageMagick可用，会优先使用ImageMagick
-- 如果ImageMagick不可用，会自动使用Pillow作为备用方案
-- 两种方案都支持完整的图片处理功能
+程序使用Pillow进行图片处理，支持完整的图片处理功能。
 
 ### 检查TinyPNG API
 ```python
@@ -233,15 +163,12 @@ py-ImagePass/
 │   ├── file_manager.py    # 文件管理
 │   └── config.py          # 配置管理
 └── utils/                 # 工具模块
-    ├── imagemagick_wrapper.py  # ImageMagick封装（含Pillow备用）
     ├── pillow_wrapper.py       # Pillow图片处理封装
     └── tinypng_client.py       # TinyPNG客户端
 ```
 
-**新增功能**:
-- `utils/pillow_wrapper.py`: 新增的Pillow图片处理封装，作为ImageMagick的备用方案
-- `utils/imagemagick_wrapper.py`: 更新后的ImageMagick封装，支持自动检测和备用方案切换
-- `test_fallback.py`: 用于测试备用方案的脚本
+**功能**:
+- `utils/pillow_wrapper.py`: Pillow图片处理封装
 
 ## 开始使用
 

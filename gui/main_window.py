@@ -12,6 +12,7 @@ from typing import Optional, List, Dict, Any
 
 from core.image_processor import ImageProcessor
 from core.file_manager import FileManager
+from gui.asset_cleaner_panel import AssetCleanerPanel
 
 class ImageProcessorGUI:
     """图像处理器主窗口类"""
@@ -54,19 +55,24 @@ class ImageProcessorGUI:
         # 配置网格权重
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(1, weight=1)
+        main_frame.columnconfigure(0, weight=3)  # 左侧主要内容区域
+        main_frame.columnconfigure(1, weight=1)  # 右侧资源清理面板
+        main_frame.rowconfigure(1, weight=1)     # 图片预览区域
+        main_frame.rowconfigure(2, weight=0)     # 控制面板区域
         
-        # 文件选择区域
+        # 文件选择区域（跨越两列）
         self.create_file_selection_area(main_frame)
         
         # 图片预览区域
         self.create_preview_area(main_frame)
         
-        # 控制面板区域
+        # 控制面板区域（跨越两列）
         self.create_control_panel(main_frame)
         
-        # 状态栏
+        # 资源清理面板
+        self.create_asset_cleaner_panel(main_frame)
+        
+        # 状态栏（跨越两列）
         self.create_status_bar(main_frame)
     
     def create_file_selection_area(self, parent):
@@ -117,7 +123,7 @@ class ImageProcessorGUI:
     def create_preview_area(self, parent):
         """创建图片预览区域"""
         preview_frame = ttk.LabelFrame(parent, text="图片预览", padding="10")
-        preview_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        preview_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
         
         # 预览容器
         preview_container = ttk.Frame(preview_frame)
@@ -149,6 +155,7 @@ class ImageProcessorGUI:
                                                   foreground="gray", font=("Arial", 9))
         self.processed_resolution_label.pack(pady=(2, 0))
         
+            
         preview_container.columnconfigure(0, weight=1)
         preview_container.columnconfigure(1, weight=1)
     
@@ -172,7 +179,17 @@ class ImageProcessorGUI:
         compress_radio = ttk.Radiobutton(process_frame, text="TinyPNG压缩", 
                                         variable=self.process_type_var, value="compress",
                                         command=self.on_process_type_change)
-        compress_radio.pack(side=tk.LEFT)
+        compress_radio.pack(side=tk.LEFT, padx=(0, 10))
+        
+        pillow_compress_radio = ttk.Radiobutton(process_frame, text="Pillow压缩", 
+                                              variable=self.process_type_var, value="pillow_compress",
+                                              command=self.on_process_type_change)
+        pillow_compress_radio.pack(side=tk.LEFT, padx=(0, 10))
+        
+        format_convert_radio = ttk.Radiobutton(process_frame, text="格式转换", 
+                                             variable=self.process_type_var, value="format_convert",
+                                             command=self.on_process_type_change)
+        format_convert_radio.pack(side=tk.LEFT)
         
         # 参数设置区域
         self.params_frame = ttk.Frame(control_frame)
@@ -346,6 +363,170 @@ class ImageProcessorGUI:
         if hasattr(self, 'api_key_status_label'):
             self.api_key_status_label.config(text=status_text, foreground=color)
     
+    def create_pillow_compress_params(self):
+        """创建Pillow压缩参数控件"""
+        # 清空现有控件
+        for widget in self.params_frame.winfo_children():
+            widget.destroy()
+        
+        # 质量设置
+        quality_frame = ttk.Frame(self.params_frame)
+        quality_frame.pack(side=tk.LEFT, padx=(0, 20))
+        
+        ttk.Label(quality_frame, text="压缩质量:").pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.pillow_quality_var = tk.StringVar(value="85")
+        quality_spinbox = ttk.Spinbox(quality_frame, from_=1, to=100, 
+                                    textvariable=self.pillow_quality_var, width=10)
+        quality_spinbox.pack(side=tk.LEFT, padx=(5, 5))
+        
+        # 质量说明标签
+        self.pillow_quality_hint_label = ttk.Label(quality_frame, text="(1-100, 数值越小压缩率越高)", foreground="gray", font=("Arial", 9))
+        self.pillow_quality_hint_label.pack(side=tk.LEFT)
+        
+        # 绑定质量变化事件
+        self.pillow_quality_var.trace('w', self.on_pillow_quality_change)
+        
+        # 压缩模式选择
+        mode_frame = ttk.Frame(self.params_frame)
+        mode_frame.pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Label(mode_frame, text="压缩模式:").pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.pillow_mode_var = tk.StringVar(value="optimize")
+        optimize_radio = ttk.Radiobutton(mode_frame, text="优化质量", 
+                                       variable=self.pillow_mode_var, value="optimize")
+        optimize_radio.pack(side=tk.LEFT, padx=(0, 5))
+        
+        resize_radio = ttk.Radiobutton(mode_frame, text="缩放压缩", 
+                                     variable=self.pillow_mode_var, value="resize_optimize")
+        resize_radio.pack(side=tk.LEFT)
+        
+        # 缩放参数（仅在缩放压缩模式下显示）
+        self.pillow_resize_frame = ttk.Frame(self.params_frame)
+        self.pillow_resize_frame.pack(side=tk.LEFT, padx=(20, 0))
+        
+        ttk.Label(self.pillow_resize_frame, text="缩放比例:").pack(side=tk.LEFT)
+        
+        self.pillow_scale_var = tk.StringVar(value="80")
+        scale_spinbox = ttk.Spinbox(self.pillow_resize_frame, from_=10, to=100, 
+                                  textvariable=self.pillow_scale_var, width=10)
+        scale_spinbox.pack(side=tk.LEFT, padx=(5, 5))
+        
+        ttk.Label(self.pillow_resize_frame, text="%").pack(side=tk.LEFT)
+        
+        # 绑定压缩模式变化事件
+        self.pillow_mode_var.trace('w', self.on_pillow_mode_change)
+        
+        # 初始化显示状态
+        self.on_pillow_mode_change()
+        self.on_pillow_quality_change()
+    
+    def on_pillow_mode_change(self, *args):
+        """处理Pillow压缩模式变化"""
+        if hasattr(self, 'pillow_mode_var') and hasattr(self, 'pillow_resize_frame'):
+            if self.pillow_mode_var.get() == "resize_optimize":
+                self.pillow_resize_frame.pack(side=tk.LEFT, padx=(20, 0))
+            else:
+                self.pillow_resize_frame.pack_forget()
+    
+    def on_pillow_quality_change(self, *args):
+        """处理Pillow压缩质量变化"""
+        if hasattr(self, 'pillow_quality_var') and hasattr(self, 'pillow_quality_hint_label'):
+            try:
+                quality = int(self.pillow_quality_var.get())
+                if quality <= 10:
+                    hint_text = "(极限压缩: 极小文件，严重失真)"
+                    color = "red"
+                elif quality <= 30:
+                    hint_text = "(高压缩: 小文件，明显失真)"
+                    color = "orange"
+                elif quality <= 50:
+                    hint_text = "(中等压缩: 较小文件，轻微失真)"
+                    color = "blue"
+                elif quality <= 75:
+                    hint_text = "(轻度压缩: 轻微减小，质量良好)"
+                    color = "green"
+                else:
+                    hint_text = "(高质量: 文件较大，质量优秀)"
+                    color = "darkgreen"
+                
+                self.pillow_quality_hint_label.config(text=f"({quality}/100 {hint_text[1:]})", foreground=color)
+            except ValueError:
+                self.pillow_quality_hint_label.config(text="(1-100, 数值越小压缩率越高)", foreground="gray")
+    
+    def create_format_convert_params(self):
+        """创建格式转换参数控件"""
+        # 清空现有控件
+        for widget in self.params_frame.winfo_children():
+            widget.destroy()
+        
+        # 目标格式选择
+        format_frame = ttk.Frame(self.params_frame)
+        format_frame.pack(side=tk.LEFT, padx=(0, 20))
+        
+        ttk.Label(format_frame, text="目标格式:").pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.output_format_var = tk.StringVar(value="JPEG")
+        format_combo = ttk.Combobox(format_frame, textvariable=self.output_format_var, 
+                                   values=["JPEG", "PNG", "WEBP", "BMP", "TIFF"], 
+                                   width=10, state="readonly")
+        format_combo.pack(side=tk.LEFT, padx=(5, 5))
+        
+        # 格式说明标签
+        self.format_hint_label = ttk.Label(format_frame, text="", foreground="gray", font=("Arial", 9))
+        self.format_hint_label.pack(side=tk.LEFT)
+        
+        # 质量设置（仅对支持质量的格式）
+        self.format_quality_frame = ttk.Frame(self.params_frame)
+        self.format_quality_frame.pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Label(self.format_quality_frame, text="质量:").pack(side=tk.LEFT)
+        
+        self.format_quality_var = tk.StringVar(value="85")
+        quality_spinbox = ttk.Spinbox(self.format_quality_frame, from_=1, to=100, 
+                                    textvariable=self.format_quality_var, width=10)
+        quality_spinbox.pack(side=tk.LEFT, padx=(5, 5))
+        
+        # 绑定格式变化事件
+        self.output_format_var.trace('w', self.on_format_change)
+        
+        # 初始化显示状态
+        self.on_format_change()
+    
+    def on_format_change(self, *args):
+        """处理格式转换的目标格式变化"""
+        if hasattr(self, 'output_format_var') and hasattr(self, 'format_hint_label'):
+            format_type = self.output_format_var.get()
+            
+            # 更新格式说明
+            if format_type == "JPEG":
+                hint_text = "(有损压缩，适合照片)"
+                show_quality = True
+            elif format_type == "PNG":
+                hint_text = "(无损压缩，支持透明)"
+                show_quality = False
+            elif format_type == "WEBP":
+                hint_text = "(现代格式，支持透明和有损)"
+                show_quality = True
+            elif format_type == "BMP":
+                hint_text = "(无压缩，兼容性好)"
+                show_quality = False
+            elif format_type == "TIFF":
+                hint_text = "(高质量，适合印刷)"
+                show_quality = False
+            else:
+                hint_text = ""
+                show_quality = False
+            
+            self.format_hint_label.config(text=hint_text)
+            
+            # 显示/隐藏质量设置
+            if show_quality:
+                self.format_quality_frame.pack(side=tk.LEFT, padx=(0, 10))
+            else:
+                self.format_quality_frame.pack_forget()
+    
     def save_tinypng_api_key(self):
         """保存TinyPNG API密钥"""
         if not hasattr(self, 'tinypng_api_key_var'):
@@ -397,6 +578,10 @@ class ImageProcessorGUI:
         self.progress_bar = ttk.Progressbar(status_frame, variable=self.progress_var, 
                                           maximum=100, length=200)
         self.progress_bar.pack(side=tk.RIGHT, padx=(10, 0))
+    
+    def create_asset_cleaner_panel(self, parent):
+        """创建资源清理面板"""
+        self.asset_cleaner_panel = AssetCleanerPanel(parent, self.config)
     
     def bind_events(self):
         """绑定事件处理"""
@@ -516,7 +701,7 @@ class ImageProcessorGUI:
             resolution = "未知分辨率"
             file_size = "未知大小"
             
-            # 使用ImageMagick获取图片信息
+            # 获取图片信息
             image_info = self.processor.get_image_info(image_path)
             if image_info and 'width' in image_info and 'height' in image_info:
                 resolution = f"{image_info['width']} × {image_info['height']}"
@@ -619,6 +804,10 @@ class ImageProcessorGUI:
             self.create_resize_params()
         elif process_type == "compress":
             self.create_tinypng_params()
+        elif process_type == "pillow_compress":
+            self.create_pillow_compress_params()
+        elif process_type == "format_convert":
+            self.create_format_convert_params()
         else:
             # 清空参数区域
             for widget in self.params_frame.winfo_children():
@@ -684,6 +873,37 @@ class ImageProcessorGUI:
                     return None
             else:
                 messagebox.showerror("API密钥错误", "请先输入TinyPNG API密钥")
+                return None
+        elif process_type == "pillow_compress":
+            # Pillow压缩参数
+            if hasattr(self, 'pillow_quality_var') and hasattr(self, 'pillow_mode_var'):
+                params = {
+                    'quality': int(self.pillow_quality_var.get()),
+                    'mode': self.pillow_mode_var.get()
+                }
+                
+                # 如果是缩放压缩模式，添加缩放参数
+                if self.pillow_mode_var.get() == "resize_optimize" and hasattr(self, 'pillow_scale_var'):
+                    params['scale'] = int(self.pillow_scale_var.get())
+                
+                return params
+            else:
+                messagebox.showerror("参数错误", "Pillow压缩参数设置错误")
+                return None
+        elif process_type == "format_convert":
+            # 格式转换参数
+            if hasattr(self, 'output_format_var'):
+                params = {
+                    'output_format': self.output_format_var.get()
+                }
+                
+                # 如果格式支持质量设置，添加质量参数
+                if self.output_format_var.get() in ["JPEG", "WEBP"] and hasattr(self, 'format_quality_var'):
+                    params['quality'] = int(self.format_quality_var.get())
+                
+                return params
+            else:
+                messagebox.showerror("参数错误", "格式转换参数设置错误")
                 return None
         else:
             return {}

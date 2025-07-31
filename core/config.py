@@ -62,13 +62,6 @@ class Config:
         """设置TinyPNG API密钥"""
         self.set('tinypng_api_key', api_key)
     
-    def get_imagemagick_path(self):
-        """获取ImageMagick路径"""
-        return self.get('imagemagick_path', '/usr/local/bin/magick')
-    
-    def set_imagemagick_path(self, path):
-        """设置ImageMagick路径"""
-        self.set('imagemagick_path', path)
     
     def get_supported_formats(self):
         """获取支持的图片格式列表"""

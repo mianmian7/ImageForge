@@ -6,7 +6,7 @@
 import os
 import threading
 from typing import Dict, List, Optional, Callable, Any
-from utils.imagemagick_wrapper import ImageMagickWrapper
+from utils.pillow_wrapper import PillowWrapper
 from utils.tinypng_client import TinyPNGClient
 from core.file_manager import FileManager
 
@@ -17,7 +17,7 @@ class ImageProcessor:
         """初始化图片处理器"""
         self.config = config
         self.file_manager = FileManager(config)
-        self.imagemagick = ImageMagickWrapper(config.get_imagemagick_path() if config else None)
+        self.pillow = PillowWrapper()
         self.tinypng = None
         self.processing_callback = None
         self.stop_processing = False
@@ -58,7 +58,7 @@ class ImageProcessor:
         """
         try:
             # 获取原始图片信息
-            original_info = self.imagemagick.get_image_info(input_path)
+            original_info = self.pillow.get_image_info(input_path)
             if not original_info:
                 return {
                     'success': False,
@@ -71,17 +71,17 @@ class ImageProcessor:
             
             # 执行调整大小
             if resize_mode == 'percentage':
-                success = self.imagemagick.resize_by_percentage(
+                success = self.pillow.resize_by_percentage(
                     input_path, output_path, resize_value, quality
                 )
             elif resize_mode == 'dimensions':
                 if isinstance(resize_value, (tuple, list)) and len(resize_value) == 2:
                     width, height = resize_value
-                    success = self.imagemagick.resize_by_dimensions(
+                    success = self.pillow.resize_by_dimensions(
                         input_path, output_path, width, height, maintain_aspect, quality
                     )
                 else:
-                    success = self.imagemagick.resize_by_dimensions(
+                    success = self.pillow.resize_by_dimensions(
                         input_path, output_path, resize_value, None, maintain_aspect, quality
                     )
             else:
@@ -107,7 +107,7 @@ class ImageProcessor:
             else:
                 return {
                     'success': False,
-                    'error': self.imagemagick.get_last_error(),
+                    'error': self.pillow.get_last_error(),
                     'input_size': input_size,
                     'output_size': 0
                 }
@@ -140,6 +140,134 @@ class ImageProcessor:
         
         return self.tinypng.compress_image_with_info(input_path, output_path)
     
+    def compress_image_pillow(self, input_path: str, output_path: str, 
+                            quality: int = 85, mode: str = "optimize", 
+                            scale: int = None) -> Dict[str, Any]:
+        """使用Pillow压缩图片
+        
+        Args:
+            input_path: 输入图片路径
+            output_path: 输出图片路径
+            quality: 压缩质量 (1-100)
+            mode: 压缩模式 ('optimize' 或 'resize_optimize')
+            scale: 缩放比例 (仅在resize_optimize模式下有效)
+            
+        Returns:
+            dict: 压缩结果
+        """
+        try:
+            # 获取原始图片信息
+            original_info = self.pillow.get_image_info(input_path)
+            if not original_info:
+                return {
+                    'success': False,
+                    'error': '无法获取图片信息',
+                    'input_size': 0,
+                    'output_size': 0
+                }
+            
+            input_size = original_info['filesize']
+            
+            # 执行压缩
+            if mode == "optimize":
+                # 纯质量优化压缩
+                success = self.pillow.optimize_image(input_path, output_path, quality)
+            elif mode == "resize_optimize" and scale:
+                # 缩放+质量优化压缩
+                success = self.pillow.resize_by_percentage(input_path, output_path, scale, quality)
+            else:
+                return {
+                    'success': False,
+                    'error': '不支持的压缩模式或缺少缩放参数',
+                    'input_size': input_size,
+                    'output_size': 0
+                }
+            
+            if success:
+                # 获取处理后图片信息
+                output_size = os.path.getsize(output_path)
+                
+                return {
+                    'success': True,
+                    'error': None,
+                    'input_size': input_size,
+                    'output_size': output_size,
+                    'compression_ratio': (1 - output_size / input_size) * 100,
+                    'original_info': original_info
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': self.pillow.get_last_error(),
+                    'input_size': input_size,
+                    'output_size': 0
+                }
+                
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e),
+                'input_size': 0,
+                'output_size': 0
+            }
+    
+    def convert_image_format(self, input_path: str, output_path: str, 
+                           output_format: str, quality: int = 85) -> Dict[str, Any]:
+        """转换图片格式
+        
+        Args:
+            input_path: 输入图片路径
+            output_path: 输出图片路径
+            output_format: 输出格式
+            quality: 图片质量 (仅对支持质量的格式有效)
+            
+        Returns:
+            dict: 转换结果
+        """
+        try:
+            # 获取原始图片信息
+            original_info = self.pillow.get_image_info(input_path)
+            if not original_info:
+                return {
+                    'success': False,
+                    'error': '无法获取图片信息',
+                    'input_size': 0,
+                    'output_size': 0
+                }
+            
+            input_size = original_info['filesize']
+            
+            # 执行格式转换
+            success = self.pillow.convert_format(input_path, output_path, output_format, quality)
+            
+            if success:
+                # 获取处理后图片信息
+                output_size = os.path.getsize(output_path)
+                
+                return {
+                    'success': True,
+                    'error': None,
+                    'input_size': input_size,
+                    'output_size': output_size,
+                    'compression_ratio': (1 - output_size / input_size) * 100,
+                    'original_info': original_info
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': self.pillow.get_last_error(),
+                    'input_size': input_size,
+                    'output_size': 0
+                }
+                
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e),
+                'input_size': 0,
+                'output_size': 0
+            }
+    
     def process_single_image(self, input_path: str, output_path: str, 
                            process_type: str, process_params: Dict[str, Any]) -> Dict[str, Any]:
         """处理单张图片
@@ -147,7 +275,7 @@ class ImageProcessor:
         Args:
             input_path: 输入图片路径
             output_path: 输出图片路径
-            process_type: 处理类型 ('resize' 或 'compress')
+            process_type: 处理类型 ('resize', 'compress', 'pillow_compress', 'format_convert')
             process_params: 处理参数
             
         Returns:
@@ -164,6 +292,19 @@ class ImageProcessor:
                 )
             elif process_type == 'compress':
                 return self.compress_image_tinypng(input_path, output_path)
+            elif process_type == 'pillow_compress':
+                return self.compress_image_pillow(
+                    input_path, output_path,
+                    process_params.get('quality', 85),
+                    process_params.get('mode', 'optimize'),
+                    process_params.get('scale')
+                )
+            elif process_type == 'format_convert':
+                return self.convert_image_format(
+                    input_path, output_path,
+                    process_params.get('output_format', 'JPEG'),
+                    process_params.get('quality', 85)
+                )
             else:
                 return {
                     'success': False,
@@ -249,7 +390,7 @@ class ImageProcessor:
         Returns:
             dict: 图片信息
         """
-        return self.imagemagick.get_image_info(image_path)
+        return self.pillow.get_image_info(image_path)
     
     def validate_tinypng_api_key(self, api_key: str) -> bool:
         """验证TinyPNG API密钥
