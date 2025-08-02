@@ -109,14 +109,41 @@ class FileManager:
             self.current_file_index = index
     
     def get_output_path(self, input_path: str, output_mode: str, 
-                       output_dir: str = None) -> str:
-        """根据输出模式获取输出路径"""
+                       output_dir: str = None, output_format: str = None) -> str:
+        """根据输出模式获取输出路径
+        
+        Args:
+            input_path: 输入文件路径
+            output_mode: 输出模式 ('overwrite', 'new_folder', 'custom_dir')
+            output_dir: 输出目录（用于 custom_dir 模式）
+            output_format: 输出格式（用于格式转换）
+            
+        Returns:
+            str: 输出文件路径
+        """
+        # 获取文件名和扩展名
+        filename = os.path.basename(input_path)
+        name, ext = os.path.splitext(filename)
+        
+        # 如果指定了输出格式，修改文件扩展名
+        if output_format and output_format != "保持原格式":
+            # 格式映射
+            format_extensions = {
+                'JPEG': '.jpg',
+                'PNG': '.png',
+                'WEBP': '.webp',
+                'BMP': '.bmp',
+                'TIFF': '.tiff'
+            }
+            ext = format_extensions.get(output_format, ext)
+            filename = f"{name}{ext}"
+        
         if output_mode == 'overwrite':
+            # 覆盖模式：如果格式不同，仍使用原路径（实际处理时会覆盖）
             return input_path
         
         elif output_mode == 'new_folder':
             input_dir = os.path.dirname(input_path)
-            filename = os.path.basename(input_path)
             output_folder = os.path.join(input_dir, output_dir or 'processed_images')
             
             # 创建输出文件夹
@@ -124,7 +151,6 @@ class FileManager:
             return os.path.join(output_folder, filename)
         
         elif output_mode == 'custom_dir' and output_dir:
-            filename = os.path.basename(input_path)
             os.makedirs(output_dir, exist_ok=True)
             return os.path.join(output_dir, filename)
         

@@ -15,15 +15,19 @@ from utils.asset_cleaner import clean_start, size_start
 class AssetCleanerPanel:
     """资源清理面板类"""
     
-    def __init__(self, parent, config):
+    def __init__(self, parent, config, folder_dialog_callback=None, main_window_sync_callback=None):
         """初始化资源清理面板
         
         Args:
             parent: 父容器
             config: 配置管理器
+            folder_dialog_callback: 文件夹选择对话框回调函数
+            main_window_sync_callback: 主窗口同步回调函数
         """
         self.parent = parent
         self.config = config
+        self.folder_dialog_callback = folder_dialog_callback
+        self.main_window_sync_callback = main_window_sync_callback
         
         # 当前处理状态
         self.is_processing = False
@@ -163,15 +167,41 @@ class AssetCleanerPanel:
     
     def browse_project_directory(self):
         """浏览项目目录"""
-        directory_path = filedialog.askdirectory(
-            title="选择Cocos Creator项目资源目录",
-            initialdir=self.project_dir_var.get() or os.getcwd()
-        )
+        if self.folder_dialog_callback:
+            # 使用统一的文件夹选择对话框
+            directory_path = self.folder_dialog_callback("选择Cocos Creator项目资源目录")
+        else:
+            # 使用默认的文件夹选择对话框
+            directory_path = filedialog.askdirectory(
+                title="选择Cocos Creator项目资源目录",
+                initialdir=self.project_dir_var.get() or os.getcwd()
+            )
         
         if directory_path:
             self.project_dir_var.set(directory_path)
             # 自动生成输出文件路径
             self.generate_output_filename()
+            # 同步到主窗口
+            self.sync_to_main_window(directory_path)
+    
+    def set_project_directory(self, directory_path):
+        """设置项目目录（用于同步）
+        
+        Args:
+            directory_path: 项目目录路径
+        """
+        self.project_dir_var.set(directory_path)
+        # 自动生成输出文件路径
+        self.generate_output_filename()
+    
+    def sync_to_main_window(self, directory_path):
+        """同步文件夹路径到主窗口
+        
+        Args:
+            directory_path: 要同步的文件夹路径
+        """
+        if self.main_window_sync_callback:
+            self.main_window_sync_callback(directory_path)
     
     def browse_output_file(self):
         """浏览输出文件"""

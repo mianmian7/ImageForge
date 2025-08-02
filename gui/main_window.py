@@ -206,12 +206,7 @@ class ImageProcessorGUI:
         pillow_compress_radio = ttk.Radiobutton(process_frame, text="Pillow压缩", 
                                               variable=self.process_type_var, value="pillow_compress",
                                               command=self.on_process_type_change)
-        pillow_compress_radio.pack(side=tk.LEFT, padx=(0, 10))
-        
-        format_convert_radio = ttk.Radiobutton(process_frame, text="格式转换", 
-                                             variable=self.process_type_var, value="format_convert",
-                                             command=self.on_process_type_change)
-        format_convert_radio.pack(side=tk.LEFT)
+        pillow_compress_radio.pack(side=tk.LEFT)
         
         # 参数设置区域
         self.params_frame = ttk.Frame(control_frame)
@@ -257,12 +252,26 @@ class ImageProcessorGUI:
         
         self.batch_process_btn = ttk.Button(button_frame, text="批量处理", 
                                            command=self.batch_process_images, state=tk.DISABLED)
-        self.batch_process_btn.pack(side=tk.LEFT)
+        self.batch_process_btn.pack(side=tk.LEFT, padx=(10, 0))
+        
+        # 格式转换选项
+        ttk.Label(button_frame, text="输出格式:").pack(side=tk.LEFT, padx=(10, 5))
+        
+        self.output_format_var = tk.StringVar(value="保持原格式")
+        format_combo = ttk.Combobox(button_frame, textvariable=self.output_format_var, 
+                                   values=["保持原格式", "JPEG", "PNG", "WEBP", "BMP", "TIFF"], 
+                                   width=12, state="readonly")
+        format_combo.pack(side=tk.LEFT, padx=(0, 10))
         
     def create_asset_cleaner_panel(self, parent):
         """创建资源清理面板"""
-        # 创建资源清理面板
-        self.asset_cleaner_panel = AssetCleanerPanel(parent, self.config)
+        # 创建资源清理面板，传递统一的文件夹选择方法和同步回调
+        self.asset_cleaner_panel = AssetCleanerPanel(
+            parent, 
+            self.config, 
+            self.select_folder_dialog,
+            self.set_directory_from_asset_cleaner
+        )
         
         # 将面板放置在右侧区域
         self.asset_cleaner_panel.panel_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -499,78 +508,6 @@ class ImageProcessorGUI:
             except ValueError:
                 self.pillow_quality_hint_label.config(text="(1-100, 数值越小压缩率越高)", foreground="gray")
     
-    def create_format_convert_params(self):
-        """创建格式转换参数控件"""
-        # 清空现有控件
-        for widget in self.params_frame.winfo_children():
-            widget.destroy()
-        
-        # 目标格式选择
-        format_frame = ttk.Frame(self.params_frame)
-        format_frame.pack(side=tk.LEFT, padx=(0, 20))
-        
-        ttk.Label(format_frame, text="目标格式:").pack(side=tk.LEFT, padx=(0, 5))
-        
-        self.output_format_var = tk.StringVar(value="JPEG")
-        format_combo = ttk.Combobox(format_frame, textvariable=self.output_format_var, 
-                                   values=["JPEG", "PNG", "WEBP", "BMP", "TIFF"], 
-                                   width=10, state="readonly")
-        format_combo.pack(side=tk.LEFT, padx=(5, 5))
-        
-        # 格式说明标签
-        self.format_hint_label = ttk.Label(format_frame, text="", foreground="gray", font=("Arial", 9))
-        self.format_hint_label.pack(side=tk.LEFT)
-        
-        # 质量设置（仅对支持质量的格式）
-        self.format_quality_frame = ttk.Frame(self.params_frame)
-        self.format_quality_frame.pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Label(self.format_quality_frame, text="质量:").pack(side=tk.LEFT)
-        
-        self.format_quality_var = tk.StringVar(value="85")
-        quality_spinbox = ttk.Spinbox(self.format_quality_frame, from_=1, to=100, 
-                                    textvariable=self.format_quality_var, width=10)
-        quality_spinbox.pack(side=tk.LEFT, padx=(5, 5))
-        
-        # 绑定格式变化事件
-        self.output_format_var.trace('w', self.on_format_change)
-        
-        # 初始化显示状态
-        self.on_format_change()
-    
-    def on_format_change(self, *args):
-        """处理格式转换的目标格式变化"""
-        if hasattr(self, 'output_format_var') and hasattr(self, 'format_hint_label'):
-            format_type = self.output_format_var.get()
-            
-            # 更新格式说明
-            if format_type == "JPEG":
-                hint_text = "(有损压缩，适合照片)"
-                show_quality = True
-            elif format_type == "PNG":
-                hint_text = "(无损压缩，支持透明)"
-                show_quality = False
-            elif format_type == "WEBP":
-                hint_text = "(现代格式，支持透明和有损)"
-                show_quality = True
-            elif format_type == "BMP":
-                hint_text = "(无压缩，兼容性好)"
-                show_quality = False
-            elif format_type == "TIFF":
-                hint_text = "(高质量，适合印刷)"
-                show_quality = False
-            else:
-                hint_text = ""
-                show_quality = False
-            
-            self.format_hint_label.config(text=hint_text)
-            
-            # 显示/隐藏质量设置
-            if show_quality:
-                self.format_quality_frame.pack(side=tk.LEFT, padx=(0, 10))
-            else:
-                self.format_quality_frame.pack_forget()
-    
     def save_tinypng_api_key(self):
         """保存TinyPNG API密钥"""
         if not hasattr(self, 'tinypng_api_key_var'):
@@ -631,9 +568,12 @@ class ImageProcessorGUI:
     
     def select_directory(self):
         """选择文件夹"""
-        directory_path = filedialog.askdirectory(title="选择包含图片的文件夹")
+        directory_path = self.select_folder_dialog("选择包含图片的文件夹")
         
         if directory_path:
+            # 同步到资源清理面板
+            self.sync_to_asset_cleaner(directory_path)
+            
             recursive = self.recursive_var.get()
             files = self.file_manager.select_directory(directory_path, recursive)
             if files:
@@ -648,6 +588,63 @@ class ImageProcessorGUI:
                 self.status_label.config(text=f"已加载 {len(files)} 个图片文件{recursive_text}")
             else:
                 messagebox.showwarning("无图片文件", "所选文件夹中没有找到支持的图片文件")
+    
+    def select_folder_dialog(self, title="选择文件夹"):
+        """统一的文件夹选择对话框
+        
+        Args:
+            title: 对话框标题
+            
+        Returns:
+            str: 选择的文件夹路径，如果取消则返回空字符串
+        """
+        return filedialog.askdirectory(title=title)
+    
+    def sync_to_asset_cleaner(self, directory_path):
+        """同步文件夹路径到资源清理面板
+        
+        Args:
+            directory_path: 要同步的文件夹路径
+        """
+        if hasattr(self, 'asset_cleaner_panel') and self.asset_cleaner_panel:
+            self.asset_cleaner_panel.set_project_directory(directory_path)
+    
+    def set_directory_from_asset_cleaner(self, directory_path):
+        """从资源清理面板同步文件夹路径到主窗口
+        
+        Args:
+            directory_path: 要同步的文件夹路径
+        """
+        if directory_path:
+            # 设置文件夹路径到主窗口的文件路径输入框
+            self.file_path_var.set(directory_path)
+            
+            # 清空处理结果缓存，因为选择了新的文件集
+            self.processed_results.clear()
+            
+            # 尝试加载该文件夹中的图片文件
+            recursive = self.recursive_var.get()
+            files = self.file_manager.select_directory(directory_path, recursive)
+            if files:
+                self.load_image(files[0])
+                self.update_navigation_buttons()
+                self.update_file_count_label()
+                self.batch_process_btn.config(state=tk.NORMAL)
+                recursive_text = "及其子目录" if recursive else ""
+                self.status_label.config(text=f"已同步并加载 {len(files)} 个图片文件{recursive_text}")
+            else:
+                # 如果文件夹中没有图片文件，只是更新路径，不加载图片
+                self.current_image_path = ""
+                self.original_label.config(image='', text="请选择图片文件")
+                self.original_resolution_label.config(text="")
+                self.processed_label.config(image='', text="等待处理")
+                self.processed_resolution_label.config(text="")
+                self.process_btn.config(state=tk.DISABLED)
+                self.prev_btn.config(state=tk.DISABLED)
+                self.next_btn.config(state=tk.DISABLED)
+                self.file_count_label.config(text="0/0")
+                self.batch_process_btn.config(state=tk.DISABLED)
+                self.status_label.config(text=f"已同步到文件夹: {directory_path} (无支持的图片文件)")
     
     def on_recursive_change(self):
         """处理递归选项变更"""
@@ -832,8 +829,6 @@ class ImageProcessorGUI:
             self.create_tinypng_params()
         elif process_type == "pillow_compress":
             self.create_pillow_compress_params()
-        elif process_type == "format_convert":
-            self.create_format_convert_params()
         else:
             # 清空参数区域
             for widget in self.params_frame.winfo_children():
@@ -857,7 +852,7 @@ class ImageProcessorGUI:
     
     def select_output_directory(self):
         """选择输出目录"""
-        directory_path = filedialog.askdirectory(title="选择输出目录")
+        directory_path = self.select_folder_dialog("选择输出目录")
         if directory_path:
             self.output_directory = directory_path
             self.status_label.config(text=f"输出目录: {directory_path}")
@@ -866,6 +861,7 @@ class ImageProcessorGUI:
         """获取处理参数"""
         process_type = self.process_type_var.get()
         
+        # 基础处理参数
         if process_type == "resize":
             resize_mode = self.resize_mode_var.get()
             if resize_mode == "percentage":
@@ -885,7 +881,6 @@ class ImageProcessorGUI:
             if resize_mode == "dimensions":
                 params['maintain_aspect'] = self.maintain_aspect_var.get()
             
-            return params
         elif process_type == "compress":
             # 确保API密钥已设置
             if hasattr(self, 'tinypng_api_key_var'):
@@ -893,7 +888,7 @@ class ImageProcessorGUI:
                 if api_key:
                     # 更新处理器的API密钥
                     self.processor.set_tinypng_api_key(api_key)
-                    return {}
+                    params = {}
                 else:
                     messagebox.showerror("API密钥错误", "请先输入TinyPNG API密钥")
                     return None
@@ -911,28 +906,26 @@ class ImageProcessorGUI:
                 # 如果是缩放压缩模式，添加缩放参数
                 if self.pillow_mode_var.get() == "resize_optimize" and hasattr(self, 'pillow_scale_var'):
                     params['scale'] = int(self.pillow_scale_var.get())
-                
-                return params
             else:
                 messagebox.showerror("参数错误", "Pillow压缩参数设置错误")
                 return None
-        elif process_type == "format_convert":
-            # 格式转换参数
-            if hasattr(self, 'output_format_var'):
-                params = {
-                    'output_format': self.output_format_var.get()
-                }
-                
-                # 如果格式支持质量设置，添加质量参数
-                if self.output_format_var.get() in ["JPEG", "WEBP"] and hasattr(self, 'format_quality_var'):
-                    params['quality'] = int(self.format_quality_var.get())
-                
-                return params
-            else:
-                messagebox.showerror("参数错误", "格式转换参数设置错误")
-                return None
         else:
-            return {}
+            params = {}
+        
+        # 如果未设置params（可能是TinyPNG压缩等情况），初始化为空字典
+        if 'params' not in locals():
+            params = {}
+        
+        # 添加输出格式选项（对所有处理方式都有效）
+        if hasattr(self, 'output_format_var'):
+            output_format = self.output_format_var.get()
+            if output_format != "保持原格式":
+                params['output_format'] = output_format
+                # 为支持质量的格式添加默认质量参数
+                if output_format in ["JPEG", "WEBP"] and 'quality' not in params:
+                    params['quality'] = 85
+        
+        return params
     
     def process_image(self):
         """处理当前图片"""
@@ -966,13 +959,16 @@ class ImageProcessorGUI:
             process_type = self.process_type_var.get()
             output_mode = self.output_mode_var.get()
             
+            # 获取输出格式
+            output_format = process_params.get('output_format') if hasattr(self, 'output_format_var') else None
+            
             # 获取输出路径
             if output_mode == "custom_dir" and hasattr(self, 'output_directory'):
                 output_path = self.file_manager.get_output_path(
-                    image_path, output_mode, self.output_directory
+                    image_path, output_mode, self.output_directory, output_format
                 )
             else:
-                output_path = self.file_manager.get_output_path(image_path, output_mode)
+                output_path = self.file_manager.get_output_path(image_path, output_mode, None, output_format)
             
             # 创建备份（如果是覆盖模式）
             if output_mode == "overwrite":
@@ -1114,11 +1110,46 @@ class ImageProcessorGUI:
             if result['success'] and result.get('output_path') and result.get('input_path'):
                 self.processed_results[result['input_path']] = result['output_path']
         
-        summary = f"批量处理完成! 成功: {success_count}/{total_count}"
-        if success_count < total_count:
-            summary += f", 失败: {total_count - success_count}"
+        # 计算压缩统计信息
+        total_input_size = 0
+        total_output_size = 0
+        successful_results = [r for r in results if r['success'] and r.get('input_size', 0) > 0]
         
-        self.status_label.config(text=summary)
+        for result in successful_results:
+            total_input_size += result.get('input_size', 0)
+            total_output_size += result.get('output_size', 0)
+        
+        # 构建弹窗和状态栏的详细消息内容
+        message_lines = []
+        message_lines.append(f"批量处理完成！")
+        message_lines.append(f"成功: {success_count}/{total_count}")
+        if success_count < total_count:
+            message_lines.append(f"失败: {total_count - success_count}")
+        message_lines.append("")
+
+        status_summary_parts = [f"批量处理完成! 成功: {success_count}/{total_count}"]
+        
+        if successful_results and total_input_size > 0:
+            saved_size = total_input_size - total_output_size
+            saved_percentage = (saved_size / total_input_size) * 100
+            
+            # 弹窗信息
+            message_lines.append("压缩统计：")
+            message_lines.append(f"原始总大小: {self._format_file_size(total_input_size)}")
+            message_lines.append(f"压缩后总大小: {self._format_file_size(total_output_size)}")
+            message_lines.append(f"节省空间: {self._format_file_size(saved_size)}")
+            message_lines.append(f"压缩比例: {saved_percentage:.1f}%")
+            
+            # 状态栏信息
+            status_summary_parts.append(f"总大小: {self._format_file_size(total_input_size)} -> {self._format_file_size(total_output_size)}")
+            status_summary_parts.append(f"节省: {self._format_file_size(saved_size)} ({saved_percentage:.1f}%)")
+        else:
+            message_lines.append("没有成功处理的文件")
+        
+        # 设置状态栏和弹窗消息
+        summary = "\n".join(message_lines)
+        status_summary_text = " | ".join(status_summary_parts)
+        self.status_label.config(text=status_summary_text)
         
         # 找到第一个成功处理的文件并在预览窗口中显示
         for result in results:
@@ -1138,6 +1169,24 @@ class ImageProcessorGUI:
                     continue
         
         messagebox.showinfo("批量处理完成", summary)
+    
+    def _format_file_size(self, size_bytes):
+        """格式化文件大小显示
+        
+        Args:
+            size_bytes: 文件大小（字节）
+            
+        Returns:
+            str: 格式化后的文件大小字符串
+        """
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.1f} KB"
+        elif size_bytes < 1024 * 1024 * 1024:
+            return f"{size_bytes / (1024 * 1024):.1f} MB"
+        else:
+            return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
     
     def on_batch_process_error(self, error_message):
         """批量处理错误时的回调"""

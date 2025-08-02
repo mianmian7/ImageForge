@@ -282,36 +282,108 @@ class ImageProcessor:
             dict: 处理结果
         """
         try:
-            if process_type == 'resize':
-                return self.resize_image(
-                    input_path, output_path,
-                    process_params.get('resize_mode', 'percentage'),
-                    process_params.get('resize_value', 50),
-                    process_params.get('quality', 85),
-                    process_params.get('maintain_aspect', True)
-                )
-            elif process_type == 'compress':
-                return self.compress_image_tinypng(input_path, output_path)
-            elif process_type == 'pillow_compress':
-                return self.compress_image_pillow(
-                    input_path, output_path,
-                    process_params.get('quality', 85),
-                    process_params.get('mode', 'optimize'),
-                    process_params.get('scale')
-                )
-            elif process_type == 'format_convert':
-                return self.convert_image_format(
-                    input_path, output_path,
-                    process_params.get('output_format', 'JPEG'),
-                    process_params.get('quality', 85)
-                )
+            # 检查是否需要格式转换
+            needs_format_conversion = 'output_format' in process_params
+            temp_path = None
+            
+            if needs_format_conversion:
+                # 创建临时文件路径
+                temp_dir = os.path.dirname(output_path)
+                temp_name = f"temp_{os.path.basename(output_path)}"
+                temp_path = os.path.join(temp_dir, temp_name)
+                
+                # 根据处理类型执行相应的操作，结果存储到临时文件
+                if process_type == 'resize':
+                    result = self.resize_image(
+                        input_path, temp_path,
+                        process_params.get('resize_mode', 'percentage'),
+                        process_params.get('resize_value', 50),
+                        process_params.get('quality', 85),
+                        process_params.get('maintain_aspect', True)
+                    )
+                elif process_type == 'compress':
+                    result = self.compress_image_tinypng(input_path, temp_path)
+                elif process_type == 'pillow_compress':
+                    result = self.compress_image_pillow(
+                        input_path, temp_path,
+                        process_params.get('quality', 85),
+                        process_params.get('mode', 'optimize'),
+                        process_params.get('scale')
+                    )
+                else:
+                    return {
+                        'success': False,
+                        'error': f'不支持的处理类型: {process_type}',
+                        'input_size': 0,
+                        'output_size': 0
+                    }
+                
+                # 如果前面的处理成功，进行格式转换
+                if result['success']:
+                    format_result = self.convert_image_format(
+                        temp_path, output_path,
+                        process_params.get('output_format', 'JPEG'),
+                        process_params.get('quality', 85)
+                    )
+                    
+                    # 删除临时文件
+                    try:
+                        os.remove(temp_path)
+                    except:
+                        pass
+                    
+                    # 如果格式转换成功，组合结果
+                    if format_result['success']:
+                        # 保留原始输入大小，更新输出大小为最终格式转换后的大小
+                        combined_result = {
+                            'success': True,
+                            'error': None,
+                            'input_size': result['input_size'],  # 使用原始输入大小
+                            'output_size': format_result['output_size'],  # 使用格式转换后的输出大小
+                            'compression_ratio': (1 - format_result['output_size'] / result['input_size']) * 100,
+                            'original_info': result.get('original_info', format_result.get('original_info', {}))
+                        }
+                        return combined_result
+                    else:
+                        # 格式转换失败，返回前面的处理结果但包含格式转换错误
+                        result['success'] = False
+                        result['error'] = f"前面的处理成功，但格式转换失败: {format_result.get('error', '未知错误')}"
+                        return result
+                else:
+                    # 如果前面的处理失败或只是格式转换，直接返回结果
+                    if temp_path and os.path.exists(temp_path) and temp_path != output_path:
+                        try:
+                            import shutil
+                            shutil.move(temp_path, output_path)
+                        except:
+                            pass
+                    return result
             else:
-                return {
-                    'success': False,
-                    'error': f'不支持的处理类型: {process_type}',
-                    'input_size': 0,
-                    'output_size': 0
-                }
+                # 不需要格式转换，直接处理
+                if process_type == 'resize':
+                    return self.resize_image(
+                        input_path, output_path,
+                        process_params.get('resize_mode', 'percentage'),
+                        process_params.get('resize_value', 50),
+                        process_params.get('quality', 85),
+                        process_params.get('maintain_aspect', True)
+                    )
+                elif process_type == 'compress':
+                    return self.compress_image_tinypng(input_path, output_path)
+                elif process_type == 'pillow_compress':
+                    return self.compress_image_pillow(
+                        input_path, output_path,
+                        process_params.get('quality', 85),
+                        process_params.get('mode', 'optimize'),
+                        process_params.get('scale')
+                    )
+                else:
+                    return {
+                        'success': False,
+                        'error': f'不支持的处理类型: {process_type}',
+                        'input_size': 0,
+                        'output_size': 0
+                    }
                 
         except Exception as e:
             return {
@@ -344,9 +416,12 @@ class ImageProcessor:
                 break
             
             try:
+                # 获取输出格式
+                output_format = process_params.get('output_format')
+                
                 # 获取输出路径
                 output_path = self.file_manager.get_output_path(
-                    input_path, output_mode, output_dir
+                    input_path, output_mode, output_dir, output_format
                 )
                 
                 # 处理图片
