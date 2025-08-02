@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
       "Bash(python3 todo_manager.py)",
@@ -34,7 +35,23 @@
       "Bash(python3 -c \"from gui.main_window import ImageProcessorGUI; print(''ImageProcessorGUI imported successfully'')\")",
       "Bash(git add INSTALL.md config.ini core/config.py core/image_processor.py gui/main_window.py gui/asset_cleaner_panel.py gui/managers/ processing/ test_fallback.py tool/ utils/asset_cleaner/ utils/pillow_wrapper.py)",
       "Bash(git commit -m \"$(cat <<''EOF''\nAdd GUI improvements, asset cleaning functionality, and processing architecture\n\n- Enhanced main GUI with improved layout and functionality\n- Added asset cleaning panel for image optimization\n- Implemented comprehensive processing architecture with commands, strategies, and factory patterns\n- Added Pillow wrapper for image processing fallback\n- Integrated AssetCleanerForCocosCreator tool\n- Updated configuration and installation documentation\n\n🤖 Generated with [Claude Code](https://claude.ai/code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
-      "Bash(git push)"
+      "Bash(git push)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(python3:*)",
+      "Bash(python:*)",
+      "Bash(source:*)",
+      "Bash(pip install pyinstaller)",
+      "Bash(pyinstaller ImagePass.spec)",
+      "Bash(./ImagePass.exe --help)",
+      "Bash(timeout 10s ./ImagePass.exe)",
+      "Bash(rm convert_icon.py)",
+      "Bash(rm -rf build dist)",
+      "Bash(rm icon.ico)",
+      "Bash(rm create_simple_icon.py create_multi_size_icon.py convert_icon_hq.py)",
+      "Bash(git add .claude/settings.local.json .gitignore gui/asset_cleaner_panel.py gui/main_window.py main.py icon.ico ImagePass.spec)",
+      "Bash(git add -f ImagePass.spec)",
+      "Bash(git add .claude/settings.local.json)"
     ],
     "deny": []
   }

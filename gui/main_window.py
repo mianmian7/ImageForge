@@ -52,25 +52,22 @@ class ImageProcessorGUI:
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
-        # 配置网格权重
+        # 配置根窗口网格权重
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(0, weight=3)  # 左侧主要内容区域
-        main_frame.columnconfigure(1, weight=1)  # 右侧资源清理面板
-        main_frame.rowconfigure(1, weight=1)     # 图片预览区域
-        main_frame.rowconfigure(2, weight=0)     # 控制面板区域
+        
+        # 配置主框架网格权重
+        main_frame.columnconfigure(0, weight=2)  # 左侧内容区域
+        main_frame.columnconfigure(1, weight=1)  # 右侧面板区域
+        main_frame.rowconfigure(0, weight=0)     # 文件选择区域
+        main_frame.rowconfigure(1, weight=1)     # 预览和控制区域
+        main_frame.rowconfigure(2, weight=0)     # 状态栏区域
         
         # 文件选择区域（跨越两列）
         self.create_file_selection_area(main_frame)
         
-        # 图片预览区域
-        self.create_preview_area(main_frame)
-        
-        # 控制面板区域（跨越两列）
-        self.create_control_panel(main_frame)
-        
-        # 资源清理面板
-        self.create_asset_cleaner_panel(main_frame)
+        # 创建左右分区
+        self.create_main_content_area(main_frame)
         
         # 状态栏（跨越两列）
         self.create_status_bar(main_frame)
@@ -120,10 +117,36 @@ class ImageProcessorGUI:
         
         file_frame.columnconfigure(0, weight=1)
     
+    def create_main_content_area(self, parent):
+        """创建主内容区域（左右分区）"""
+        # 左侧内容区域
+        left_frame = ttk.Frame(parent)
+        left_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5))
+        
+        left_frame.rowconfigure(0, weight=1)     # 预览区域
+        left_frame.rowconfigure(1, weight=0)     # 控制面板
+        left_frame.columnconfigure(0, weight=1)
+        
+        # 图片预览区域
+        self.create_preview_area(left_frame)
+        
+        # 控制面板区域
+        self.create_control_panel(left_frame)
+        
+        # 右侧面板区域
+        right_frame = ttk.Frame(parent)
+        right_frame.grid(row=1, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0))
+        
+        right_frame.rowconfigure(0, weight=1)
+        right_frame.columnconfigure(0, weight=1)
+        
+        # 资源清理面板
+        self.create_asset_cleaner_panel(right_frame)
+    
     def create_preview_area(self, parent):
         """创建图片预览区域"""
         preview_frame = ttk.LabelFrame(parent, text="图片预览", padding="10")
-        preview_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        preview_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
         
         # 预览容器
         preview_container = ttk.Frame(preview_frame)
@@ -154,7 +177,6 @@ class ImageProcessorGUI:
         self.processed_resolution_label = ttk.Label(processed_frame, text="", 
                                                   foreground="gray", font=("Arial", 9))
         self.processed_resolution_label.pack(pady=(2, 0))
-        
             
         preview_container.columnconfigure(0, weight=1)
         preview_container.columnconfigure(1, weight=1)
@@ -162,7 +184,7 @@ class ImageProcessorGUI:
     def create_control_panel(self, parent):
         """创建控制面板区域"""
         control_frame = ttk.LabelFrame(parent, text="处理控制", padding="10")
-        control_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        control_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
         
         # 处理方式选择
         process_frame = ttk.Frame(control_frame)
@@ -231,11 +253,33 @@ class ImageProcessorGUI:
         
         self.stop_btn = ttk.Button(button_frame, text="停止处理", 
                                   command=self.stop_processing, state=tk.DISABLED)
-        self.stop_btn.pack(side=tk.LEFT)
+        self.stop_btn.pack(side=tk.LEFT, padx=(0, 10))
         
         self.batch_process_btn = ttk.Button(button_frame, text="批量处理", 
                                            command=self.batch_process_images, state=tk.DISABLED)
         self.batch_process_btn.pack(side=tk.LEFT)
+        
+    def create_asset_cleaner_panel(self, parent):
+        """创建资源清理面板"""
+        # 创建资源清理面板
+        self.asset_cleaner_panel = AssetCleanerPanel(parent, self.config)
+        
+        # 将面板放置在右侧区域
+        self.asset_cleaner_panel.panel_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+    
+    def create_status_bar(self, parent):
+        """创建状态栏"""
+        status_frame = ttk.Frame(parent)
+        status_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+        
+        self.status_label = ttk.Label(status_frame, text="就绪", relief=tk.SUNKEN)
+        self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # 进度条
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(status_frame, variable=self.progress_var, 
+                                          maximum=100, length=200)
+        self.progress_bar.pack(side=tk.RIGHT, padx=(10, 0))
     
     def create_resize_params(self):
         """创建分辨率调整参数控件"""
@@ -564,24 +608,6 @@ class ImageProcessorGUI:
             self.aspect_hint_label.config(text="(保持比例，图片可能不完全匹配指定尺寸)")
         else:
             self.aspect_hint_label.config(text="(强制调整，图片将完全匹配指定尺寸，可能变形)")
-    
-    def create_status_bar(self, parent):
-        """创建状态栏"""
-        status_frame = ttk.Frame(parent)
-        status_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E))
-        
-        self.status_label = ttk.Label(status_frame, text="就绪", relief=tk.SUNKEN)
-        self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        # 进度条
-        self.progress_var = tk.DoubleVar()
-        self.progress_bar = ttk.Progressbar(status_frame, variable=self.progress_var, 
-                                          maximum=100, length=200)
-        self.progress_bar.pack(side=tk.RIGHT, padx=(10, 0))
-    
-    def create_asset_cleaner_panel(self, parent):
-        """创建资源清理面板"""
-        self.asset_cleaner_panel = AssetCleanerPanel(parent, self.config)
     
     def bind_events(self):
         """绑定事件处理"""

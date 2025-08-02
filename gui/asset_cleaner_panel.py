@@ -34,19 +34,18 @@ class AssetCleanerPanel:
     
     def create_panel(self):
         """创建资源清理面板"""
-        # 创建主框架
-        panel_frame = ttk.LabelFrame(self.parent, text="资源清理工具", padding="8")
-        panel_frame.grid(row=2, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(10, 0), pady=(10, 0))
+        # 创建主框架，但不设置grid位置，由外部调用者设置
+        self.panel_frame = ttk.LabelFrame(self.parent, text="资源清理工具", padding="8")
         
         # 配置网格权重
-        panel_frame.columnconfigure(0, weight=1)
-        panel_frame.rowconfigure(4, weight=1)
+        self.panel_frame.columnconfigure(0, weight=1)
+        self.panel_frame.rowconfigure(4, weight=1)
         
         # 创建各个控件
-        self.create_directory_controls(panel_frame)
-        self.create_analysis_controls(panel_frame)
-        self.create_action_controls(panel_frame)
-        self.create_results_display(panel_frame)
+        self.create_directory_controls(self.panel_frame)
+        self.create_analysis_controls(self.panel_frame)
+        self.create_action_controls(self.panel_frame)
+        self.create_results_display(self.panel_frame)
     
     def create_directory_controls(self, parent):
         """创建目录选择控件"""
