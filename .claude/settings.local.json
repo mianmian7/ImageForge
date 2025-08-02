@@ -51,7 +51,16 @@
       "Bash(rm create_simple_icon.py create_multi_size_icon.py convert_icon_hq.py)",
       "Bash(git add .claude/settings.local.json .gitignore gui/asset_cleaner_panel.py gui/main_window.py main.py icon.ico ImagePass.spec)",
       "Bash(git add -f ImagePass.spec)",
-      "Bash(git add .claude/settings.local.json)"
+      "Bash(git add .claude/settings.local.json)",
+      "Bash(git remote set-url origin https://github.com/mianmian7/py-IamgePass.git)",
+      "mcp______zhi",
+      "Bash(rm -rf build/ dist/)",
+      "Bash(git add .)",
+      "Bash(git reset .claude/settings.local.json)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nfeat: Add format conversion dropdown and refactor processing logic\n\n- Adds a format conversion dropdown to the main UI, allowing users to select an output format for all processing types.\n- Refactors the `ImageProcessor` to handle format conversion as a final step after other operations like resizing or compression.\n- Fixes a bug where compression statistics were calculated incorrectly when format conversion was applied.\n- Removes the redundant, standalone \"Format Convert\" processing type and related UI elements.\n- Deletes obsolete architecture and processing modules.\n\n🤖 Generated with [Claude Code](https://claude.ai/code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(mkdir -p \"G:\\dev\\ai\\py-ImagePass\\tools\")",
+      "Bash(mv \"G:\\dev\\ai\\py-ImagePass\\tool\\AssetCleanerForCocosCreator-master\" \"G:\\dev\\ai\\py-ImagePass\\tools\\asset-cleaner-cocos\")",
+      "Bash(rmdir \"G:\\dev\\ai\\py-ImagePass\\tool\")"
     ],
     "deny": []
   }

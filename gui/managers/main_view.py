@@ -1,5 +1,5 @@
 """
-Main View for ImagePass GUI
+Main View for ImageForge GUI
 Acts as a coordinator for all UI managers
 """
 

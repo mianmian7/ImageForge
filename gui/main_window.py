@@ -42,7 +42,7 @@ class ImageProcessorGUI:
         self.processed_results = {}  # 存储输入路径到输出路径的映射
         
         # 设置窗口图标和标题
-        self.root.title("ImagePass - 图像处理器")
+        self.root.title("ImageForge - 图像处理器")
         self.setup_ui()
         self.bind_events()
     

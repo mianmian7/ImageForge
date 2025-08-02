@@ -1,5 +1,5 @@
 """
-Process Control Manager for ImagePass GUI
+Process Control Manager for ImageForge GUI
 Handles processing parameters and control operations
 """
 

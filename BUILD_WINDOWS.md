@@ -15,11 +15,11 @@ pip install pyinstaller
 
 ### 2. 构建 exe 文件
 ```cmd
-pyinstaller ImagePass.spec
+pyinstaller ImageForge.spec
 ```
 
 ### 3. 查找生成的文件
-构建完成后，exe文件将位于 `dist/ImagePass.exe`
+构建完成后，exe文件将位于 `dist/ImageForge.exe`
 
 ## 重要说明
 
@@ -31,7 +31,7 @@ pyinstaller ImagePass.spec
 1. **在Windows机器上执行**：
    - 将整个项目文件夹复制到Windows机器
    - 在Windows上安装Python和依赖
-   - 运行 `pyinstaller ImagePass.spec`
+   - 运行 `pyinstaller ImageForge.spec`
 
 2. **使用交叉编译工具**（高级）：
    - 使用 `wine` 在Linux上模拟Windows环境

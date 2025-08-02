@@ -1,5 +1,5 @@
 """
-File Manager View for ImagePass GUI
+File Manager View for ImageForge GUI
 Handles file selection and navigation UI
 """
 

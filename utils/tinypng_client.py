@@ -25,7 +25,7 @@ class TinyPNGClient:
         # 设置认证头
         self.session.auth = (api_key, '')
         self.session.headers.update({
-            'User-Agent': 'ImagePass/1.0'
+            'User-Agent': 'ImageForge/1.0'
         })
     
     def compress_image(self, input_path: str, output_path: str) -> bool:

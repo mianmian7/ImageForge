@@ -1,5 +1,5 @@
 """
-Preview Manager for ImagePass GUI
+Preview Manager for ImageForge GUI
 Handles image preview display and management
 """
 

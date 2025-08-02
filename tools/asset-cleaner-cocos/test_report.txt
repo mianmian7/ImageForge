@@ -1,0 +1,10 @@
+Total Project Size: 0.0220 MB, Directory: G:\dev\ai\AssetCleanerForCocosCreator-master\src
+
+Type: .js, Count: 5, Total Size: 0.0220 MB
+
+--- Details for .js ---
+Size: 14.47 KB, Path: G:\dev\ai\AssetCleanerForCocosCreator-master\src\AssetCleaner.js
+Size: 3.85 KB, Path: G:\dev\ai\AssetCleanerForCocosCreator-master\src\AssetSize.js
+Size: 2.04 KB, Path: G:\dev\ai\AssetCleanerForCocosCreator-master\src\FileHelper.js
+Size: 1.58 KB, Path: G:\dev\ai\AssetCleanerForCocosCreator-master\src\main.js
+Size: 0.60 KB, Path: G:\dev\ai\AssetCleanerForCocosCreator-master\src\Utils.js

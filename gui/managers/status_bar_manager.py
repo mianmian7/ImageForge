@@ -1,5 +1,5 @@
 """
-Status Bar Manager for ImagePass GUI
+Status Bar Manager for ImageForge GUI
 Handles status bar and progress display
 """
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ImagePass - Python GUI Image Processor
+ImageForge - Python GUI Image Processor
 主程序入口文件
 """
 
@@ -24,7 +24,7 @@ def main():
         
         # 创建主窗口
         root = tk.Tk()
-        root.title("ImagePass - 图像处理器")
+        root.title("ImageForge - 图像处理器")
         root.geometry(f"{config.get('window_width', '1200')}x{config.get('window_height', '800')}")
         
         # 设置窗口图标

@@ -23,7 +23,7 @@ python test_fallback.py  # Test fallback functionality
 
 ## Architecture Overview
 
-**py-ImagePass** is a Python GUI application for image processing with a modular, dependency-injected architecture.
+**ImageForge** is a Python GUI application for image processing with a modular, dependency-injected architecture.
 
 ### Core Architecture Pattern
 - **Dependency Injection**: `architecture/di.py` - Central service container

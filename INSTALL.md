@@ -1,4 +1,4 @@
-# ImagePass 安装指南
+# ImageForge 安装指南
 
 ## 系统要求
 - Python 3.8+
@@ -28,7 +28,7 @@ brew install python
 ### 2. 创建虚拟环境
 ```bash
 # 进入项目目录
-cd /home/mianmian/py-ImagePass
+cd /home/mianmian/ImageForge
 
 # 创建虚拟环境
 python3 -m venv venv
@@ -150,7 +150,7 @@ print('API验证结果:', client.validate_api_key())
 
 安装完成后，项目结构应该是：
 ```
-py-ImagePass/
+ImageForge/
 ├── venv/                   # 虚拟环境
 ├── main.py                 # 主程序
 ├── requirements.txt        # Python依赖
