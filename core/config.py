@@ -37,7 +37,7 @@ class Config:
         except Exception as e:
             print(f"保存配置文件失败: {e}")
     
-    def get(self, key, default=None, section='DEFAULT'):
+    def get(self, key, default=None, section='Settings'):
         """获取配置值"""
         try:
             return self.config.get(section, key, fallback=default)
@@ -45,7 +45,7 @@ class Config:
             print(f"获取配置失败: {e}")
             return default
     
-    def set(self, key, value, section='DEFAULT'):
+    def set(self, key, value, section='Settings'):
         """设置配置值"""
         try:
             if not self.config.has_section(section):
@@ -83,3 +83,17 @@ class Config:
         width = self.get('preview_max_width', '400')
         height = self.get('preview_max_height', '400')
         return int(width), int(height)
+    
+    def get_resolution_filter_config(self):
+        """获取分辨率过滤配置"""
+        return {
+            'enabled': self.get('enable_resolution_filter', 'False').lower() == 'true',
+            'min_width': int(self.get('min_resolution_width', '1920')),
+            'min_height': int(self.get('min_resolution_height', '1080'))
+        }
+    
+    def set_resolution_filter_config(self, enabled: bool, min_width: int, min_height: int):
+        """设置分辨率过滤配置"""
+        self.set('enable_resolution_filter', str(enabled))
+        self.set('min_resolution_width', str(min_width))
+        self.set('min_resolution_height', str(min_height))

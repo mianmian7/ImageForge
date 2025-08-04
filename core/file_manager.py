@@ -6,7 +6,8 @@
 import os
 import shutil
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any
+from utils.pillow_wrapper import PillowWrapper
 
 class FileManager:
     """文件管理类"""
@@ -17,6 +18,7 @@ class FileManager:
         self.current_directory = ""
         self.current_files = []
         self.current_file_index = 0
+        self.pillow = PillowWrapper()
     
     def get_supported_formats(self) -> List[str]:
         """获取支持的图片格式"""
@@ -69,7 +71,7 @@ class FileManager:
                 if os.path.isfile(file_path) and self.is_image_file(file_path):
                     self.current_files.append(file_path)
         
-        self.current_files.sort()
+        self.current_files.sort(key=lambda x: os.path.getsize(x), reverse=True)
         self.current_file_index = 0
         return self.current_files
     
@@ -182,6 +184,77 @@ class FileManager:
         except Exception as e:
             print(f"创建备份失败: {e}")
             return None
+    
+    def check_image_resolution(self, file_path: str, min_width: int, min_height: int) -> bool:
+        """检查图片分辨率是否符合要求
+        
+        Args:
+            file_path: 图片文件路径
+            min_width: 最小宽度
+            min_height: 最小高度
+            
+        Returns:
+            bool: 是否符合分辨率要求
+        """
+        try:
+            image_info = self.pillow.get_image_info(file_path)
+            if image_info and 'width' in image_info and 'height' in image_info:
+                width = image_info['width']
+                height = image_info['height']
+                return width >= min_width and height >= min_height
+            return False
+        except Exception:
+            return False
+    
+    def select_directory_with_filter(self, directory_path: str, recursive: bool = True, 
+                                   resolution_filter: Dict[str, Any] = None) -> List[str]:
+        """选择目录并获取所有支持的图片文件（带分辨率过滤）
+        
+        Args:
+            directory_path: 目录路径
+            recursive: 是否递归读取子目录
+            resolution_filter: 分辨率过滤配置 {'enabled': bool, 'min_width': int, 'min_height': int}
+            
+        Returns:
+            list: 过滤后的图片文件路径列表
+        """
+        if not os.path.isdir(directory_path):
+            return []
+        
+        self.current_directory = directory_path
+        self.current_files = []
+        
+        # 获取所有图片文件
+        all_files = []
+        if recursive:
+            # 递归遍历所有子目录
+            for root, dirs, files in os.walk(directory_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    if self.is_image_file(file_path):
+                        all_files.append(file_path)
+        else:
+            # 只遍历当前目录
+            for file in os.listdir(directory_path):
+                file_path = os.path.join(directory_path, file)
+                if os.path.isfile(file_path) and self.is_image_file(file_path):
+                    all_files.append(file_path)
+        
+        # 应用分辨率过滤
+        if resolution_filter and resolution_filter.get('enabled', False):
+            min_width = resolution_filter.get('min_width', 0)
+            min_height = resolution_filter.get('min_height', 0)
+            
+            for file_path in all_files:
+                if self.check_image_resolution(file_path, min_width, min_height):
+                    self.current_files.append(file_path)
+        else:
+            # 不应用分辨率过滤
+            self.current_files = all_files
+        
+        self.current_files.sort(key=lambda x: os.path.getsize(x), reverse=True)
+        self.current_file_index = 0
+        return self.current_files
     
     def get_file_info(self, file_path: str) -> dict:
         """获取文件信息"""
