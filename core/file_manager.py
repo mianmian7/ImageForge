@@ -7,6 +7,7 @@ import os
 import shutil
 from pathlib import Path
 from typing import List, Optional, Tuple, Dict, Any
+from PIL import Image
 from utils.pillow_wrapper import PillowWrapper
 
 class FileManager:
@@ -255,6 +256,62 @@ class FileManager:
         self.current_files.sort(key=lambda x: os.path.getsize(x), reverse=True)
         self.current_file_index = 0
         return self.current_files
+    
+    def select_directory_with_filter_and_sort(self, directory_path: str, recursive: bool = True, 
+                                             resolution_filter: Dict[str, Any] = None, 
+                                             sort_config: str = None) -> List[str]:
+        """选择目录并获取所有支持的图片文件（带分辨率过滤和排序）
+        
+        Args:
+            directory_path: 目录路径
+            recursive: 是否递归读取子目录
+            resolution_filter: 分辨率过滤配置 {'enabled': bool, 'min_width': int, 'min_height': int}
+            sort_config: 排序配置，支持的值：file_size_desc, file_size_asc, width_desc, width_asc, height_desc, height_asc, filename_asc, filename_desc
+            
+        Returns:
+            list: 过滤和排序后的图片文件路径列表
+        """
+        files = self.select_directory_with_filter(directory_path, recursive, resolution_filter)
+        
+        if sort_config and files:
+            # 根据排序配置进行排序
+            if sort_config == "file_size_desc":
+                files.sort(key=lambda x: os.path.getsize(x), reverse=True)
+            elif sort_config == "file_size_asc":
+                files.sort(key=lambda x: os.path.getsize(x), reverse=False)
+            elif sort_config == "width_desc":
+                files.sort(key=lambda x: self.get_image_width(x), reverse=True)
+            elif sort_config == "width_asc":
+                files.sort(key=lambda x: self.get_image_width(x), reverse=False)
+            elif sort_config == "height_desc":
+                files.sort(key=lambda x: self.get_image_height(x), reverse=True)
+            elif sort_config == "height_asc":
+                files.sort(key=lambda x: self.get_image_height(x), reverse=False)
+            elif sort_config == "filename_asc":
+                files.sort(key=lambda x: os.path.basename(x).lower(), reverse=False)
+            elif sort_config == "filename_desc":
+                files.sort(key=lambda x: os.path.basename(x).lower(), reverse=True)
+            else:
+                # 默认按文件大小降序
+                files.sort(key=lambda x: os.path.getsize(x), reverse=True)
+        
+        return files
+    
+    def get_image_width(self, file_path: str) -> int:
+        """获取图片宽度"""
+        try:
+            with Image.open(file_path) as img:
+                return img.width
+        except Exception:
+            return 0
+    
+    def get_image_height(self, file_path: str) -> int:
+        """获取图片高度"""
+        try:
+            with Image.open(file_path) as img:
+                return img.height
+        except Exception:
+            return 0
     
     def get_file_info(self, file_path: str) -> dict:
         """获取文件信息"""

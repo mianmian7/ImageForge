@@ -45,6 +45,13 @@ class ImageProcessorGUI:
         self.root.title("ImageForge - 图像处理器")
         self.setup_ui()
         self.bind_events()
+        
+        # 加载配置
+        self.load_resolution_filter_config()
+        self.load_sort_config()
+        
+        # 绑定分辨率过滤控件事件
+        self.create_resolution_filter_controls()
     
     def setup_ui(self):
         """设置用户界面"""
@@ -74,8 +81,8 @@ class ImageProcessorGUI:
     
     def create_file_selection_area(self, parent):
         """创建文件选择区域"""
-        file_frame = ttk.LabelFrame(parent, text="文件选择", padding="10")
-        file_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        file_frame = ttk.LabelFrame(parent, text="文件选择", padding="5")
+        file_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 5))
         
         # 文件路径显示
         self.file_path_var = tk.StringVar()
@@ -103,7 +110,7 @@ class ImageProcessorGUI:
         
         # 递归选项
         recursive_frame = ttk.Frame(file_frame)
-        recursive_frame.grid(row=1, column=0, columnspan=6, sticky=(tk.W, tk.E), pady=(5, 0))
+        recursive_frame.grid(row=1, column=0, columnspan=6, sticky=(tk.W, tk.E), pady=(2, 2))
         
         self.recursive_var = tk.BooleanVar(value=True)
         recursive_check = ttk.Checkbutton(recursive_frame, text="递归读取子目录", 
@@ -114,6 +121,67 @@ class ImageProcessorGUI:
         self.recursive_hint_label = ttk.Label(recursive_frame, text="(勾选后读取文件夹及其所有子文件夹中的图片)", 
                                            foreground="gray", font=("Arial", 9))
         self.recursive_hint_label.pack(side=tk.LEFT)
+        
+        # 分辨率过滤选项
+        filter_frame = ttk.Frame(file_frame)
+        filter_frame.grid(row=2, column=0, columnspan=6, sticky=(tk.W, tk.E), pady=(2, 2))
+        
+        self.resolution_filter_var = tk.BooleanVar(value=False)
+        filter_check = ttk.Checkbutton(filter_frame, text="启用分辨率过滤", 
+                                     variable=self.resolution_filter_var,
+                                     command=self.on_resolution_filter_change)
+        filter_check.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # 分辨率输入区域
+        self.resolution_input_frame = ttk.Frame(filter_frame)
+        self.resolution_input_frame.pack(side=tk.LEFT)
+        
+        ttk.Label(self.resolution_input_frame, text="最小分辨率:").pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.min_width_var = tk.StringVar(value="1920")
+        width_spinbox = ttk.Spinbox(self.resolution_input_frame, from_=1, to=10000, 
+                                   textvariable=self.min_width_var, width=8)
+        width_spinbox.pack(side=tk.LEFT, padx=(0, 2))
+        
+        ttk.Label(self.resolution_input_frame, text="×").pack(side=tk.LEFT, padx=(2, 2))
+        
+        self.min_height_var = tk.StringVar(value="1080")
+        height_spinbox = ttk.Spinbox(self.resolution_input_frame, from_=1, to=10000, 
+                                    textvariable=self.min_height_var, width=8)
+        height_spinbox.pack(side=tk.LEFT, padx=(2, 5))
+        
+        ttk.Label(self.resolution_input_frame, text="像素").pack(side=tk.LEFT)
+        
+        # 分辨率过滤提示标签
+        self.resolution_hint_label = ttk.Label(filter_frame, text="(启用后只处理等于或高于指定分辨率的图片)", 
+                                             foreground="gray", font=("Arial", 9))
+        self.resolution_hint_label.pack(side=tk.LEFT, padx=(10, 0))
+        
+        # 文件排序选项
+        sort_frame = ttk.Frame(file_frame)
+        sort_frame.grid(row=3, column=0, columnspan=6, sticky=(tk.W, tk.E), pady=(2, 2))
+        
+        ttk.Label(sort_frame, text="文件排序:").pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.sort_option_var = tk.StringVar(value="file_size_desc")
+        sort_combo = ttk.Combobox(sort_frame, textvariable=self.sort_option_var, 
+                                 values=["按文件大小(大到小)", "按文件大小(小到大)", 
+                                        "按分辨率宽度(大到小)", "按分辨率宽度(小到大)", 
+                                        "按分辨率高度(大到小)", "按分辨率高度(小到大)",
+                                        "按文件名(A-Z)", "按文件名(Z-A)"], 
+                                 width=18, state="readonly")
+        sort_combo.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # 排序提示标签
+        self.sort_hint_label = ttk.Label(sort_frame, text="(选择文件列表排序方式)", 
+                                       foreground="gray", font=("Arial", 9))
+        self.sort_hint_label.pack(side=tk.LEFT, padx=(10, 0))
+        
+        # 绑定排序变化事件
+        self.sort_option_var.trace('w', self.on_sort_option_change)
+        
+        # 初始化分辨率过滤状态
+        self.on_resolution_filter_change()
         
         file_frame.columnconfigure(0, weight=1)
     
@@ -475,6 +543,31 @@ class ImageProcessorGUI:
         self.on_pillow_mode_change()
         self.on_pillow_quality_change()
     
+    def create_resolution_filter_controls(self):
+        """创建分辨率过滤控件的事件绑定"""
+        # 为宽度和高度输入框绑定变化事件
+        if hasattr(self, 'min_width_var') and hasattr(self, 'min_height_var'):
+            self.min_width_var.trace('w', self.on_resolution_filter_value_change)
+            self.min_height_var.trace('w', self.on_resolution_filter_value_change)
+    
+    def on_resolution_filter_value_change(self, *args):
+        """处理分辨率过滤数值变化"""
+        # 保存配置
+        self.save_resolution_filter_config()
+        
+        # 如果已经有文件夹选择，重新加载文件并清空缓存
+        if self.file_manager.current_directory:
+            self.reload_current_directory()
+    
+    def on_sort_option_change(self, *args):
+        """处理排序选项变化"""
+        # 保存排序配置
+        self.save_sort_config()
+        
+        # 如果已经有文件夹选择，重新加载文件并清空缓存
+        if self.file_manager.current_directory:
+            self.reload_current_directory()
+    
     def on_pillow_mode_change(self, *args):
         """处理Pillow压缩模式变化"""
         if hasattr(self, 'pillow_mode_var') and hasattr(self, 'pillow_resize_frame'):
@@ -575,7 +668,13 @@ class ImageProcessorGUI:
             self.sync_to_asset_cleaner(directory_path)
             
             recursive = self.recursive_var.get()
-            files = self.file_manager.select_directory(directory_path, recursive)
+            resolution_filter = self.get_resolution_filter_config()
+            sort_config = self.get_sort_config()
+            
+            files = self.file_manager.select_directory_with_filter_and_sort(
+                directory_path, recursive, resolution_filter, sort_config
+            )
+            
             if files:
                 # 清空处理结果缓存，因为选择了新的文件集
                 self.processed_results.clear()
@@ -584,10 +683,24 @@ class ImageProcessorGUI:
                 self.update_navigation_buttons()
                 self.update_file_count_label()
                 self.batch_process_btn.config(state=tk.NORMAL)
-                recursive_text = "及其子目录" if recursive else ""
-                self.status_label.config(text=f"已加载 {len(files)} 个图片文件{recursive_text}")
+                
+                # 构建状态信息
+                parts = [f"已加载 {len(files)} 个图片文件"]
+                if recursive:
+                    parts.append("及其子目录")
+                if resolution_filter['enabled']:
+                    parts.append(f"(分辨率≥{resolution_filter['min_width']}×{resolution_filter['min_height']})")
+                
+                status_text = "".join(parts)
+                self.status_label.config(text=status_text)
             else:
-                messagebox.showwarning("无图片文件", "所选文件夹中没有找到支持的图片文件")
+                # 构建错误信息
+                error_parts = ["所选文件夹中没有找到支持的图片文件"]
+                if resolution_filter['enabled']:
+                    error_parts.append(f"(分辨率要求≥{resolution_filter['min_width']}×{resolution_filter['min_height']})")
+                
+                error_text = " ".join(error_parts)
+                messagebox.showwarning("无图片文件", error_text)
     
     def select_folder_dialog(self, title="选择文件夹"):
         """统一的文件夹选择对话框
@@ -624,14 +737,28 @@ class ImageProcessorGUI:
             
             # 尝试加载该文件夹中的图片文件
             recursive = self.recursive_var.get()
-            files = self.file_manager.select_directory(directory_path, recursive)
+            resolution_filter = self.get_resolution_filter_config()
+            sort_config = self.get_sort_config()
+            
+            files = self.file_manager.select_directory_with_filter_and_sort(
+                directory_path, recursive, resolution_filter, sort_config
+            )
+            
             if files:
                 self.load_image(files[0])
                 self.update_navigation_buttons()
                 self.update_file_count_label()
                 self.batch_process_btn.config(state=tk.NORMAL)
-                recursive_text = "及其子目录" if recursive else ""
-                self.status_label.config(text=f"已同步并加载 {len(files)} 个图片文件{recursive_text}")
+                
+                # 构建状态信息
+                parts = [f"已同步并加载 {len(files)} 个图片文件"]
+                if recursive:
+                    parts.append("及其子目录")
+                if resolution_filter['enabled']:
+                    parts.append(f"(分辨率≥{resolution_filter['min_width']}×{resolution_filter['min_height']})")
+                
+                status_text = "".join(parts)
+                self.status_label.config(text=status_text)
             else:
                 # 如果文件夹中没有图片文件，只是更新路径，不加载图片
                 self.current_image_path = ""
@@ -644,7 +771,14 @@ class ImageProcessorGUI:
                 self.next_btn.config(state=tk.DISABLED)
                 self.file_count_label.config(text="0/0")
                 self.batch_process_btn.config(state=tk.DISABLED)
-                self.status_label.config(text=f"已同步到文件夹: {directory_path} (无支持的图片文件)")
+                
+                # 构建错误信息
+                error_parts = [f"已同步到文件夹: {directory_path} (无支持的图片文件)"]
+                if resolution_filter['enabled']:
+                    error_parts.append(f"(分辨率要求≥{resolution_filter['min_width']}×{resolution_filter['min_height']})")
+                
+                status_text = " ".join(error_parts)
+                self.status_label.config(text=status_text)
     
     def on_recursive_change(self):
         """处理递归选项变更"""
@@ -655,32 +789,156 @@ class ImageProcessorGUI:
         
         # 如果已经有文件夹选择，重新加载文件并清空缓存
         if self.file_manager.current_directory:
-            recursive = self.recursive_var.get()
-            files = self.file_manager.select_directory(self.file_manager.current_directory, recursive)
-            if files:
-                # 清空处理结果缓存
-                self.processed_results.clear()
-                
-                self.load_image(files[0])
-                self.update_navigation_buttons()
-                self.update_file_count_label()
-                recursive_text = "及其子目录" if recursive else ""
-                self.status_label.config(text=f"已重新加载 {len(files)} 个图片文件{recursive_text}")
-            else:
-                # 没有文件时清空显示
-                self.processed_results.clear()
-                self.current_image_path = ""
-                self.file_path_var.set("")
-                self.original_label.config(image='', text="请选择图片文件")
-                self.original_resolution_label.config(text="")
-                self.processed_label.config(image='', text="等待处理")
-                self.processed_resolution_label.config(text="")
-                self.process_btn.config(state=tk.DISABLED)
-                self.prev_btn.config(state=tk.DISABLED)
-                self.next_btn.config(state=tk.DISABLED)
-                self.file_count_label.config(text="0/0")
-                self.batch_process_btn.config(state=tk.DISABLED)
-                self.status_label.config(text="所选文件夹中没有找到支持的图片文件")
+            self.reload_current_directory()
+    
+    def on_resolution_filter_change(self):
+        """处理分辨率过滤选项变更"""
+        if self.resolution_filter_var.get():
+            self.resolution_input_frame.pack(side=tk.LEFT)
+            self.resolution_hint_label.config(text="(启用后只处理等于或高于指定分辨率的图片)")
+        else:
+            self.resolution_input_frame.pack_forget()
+            self.resolution_hint_label.config(text="(禁用后将处理所有图片文件)")
+        
+        # 保存配置
+        self.save_resolution_filter_config()
+        
+        # 如果已经有文件夹选择，重新加载文件并清空缓存
+        if self.file_manager.current_directory:
+            self.reload_current_directory()
+    
+    def reload_current_directory(self):
+        """重新加载当前目录的文件"""
+        if not self.file_manager.current_directory:
+            return
+        
+        recursive = self.recursive_var.get()
+        resolution_filter = self.get_resolution_filter_config()
+        sort_config = self.get_sort_config()
+        
+        files = self.file_manager.select_directory_with_filter_and_sort(
+            self.file_manager.current_directory, recursive, resolution_filter, sort_config
+        )
+        
+        if files:
+            # 创建新的处理结果缓存，只保留仍然在文件列表中的已处理图片
+            current_files_set = set(files)
+            preserved_results = {
+                input_path: output_path 
+                for input_path, output_path in self.processed_results.items() 
+                if input_path in current_files_set
+            }
+            self.processed_results = preserved_results
+            
+            self.load_image(files[0])
+            self.update_navigation_buttons()
+            self.update_file_count_label()
+            
+            # 构建状态信息
+            parts = [f"已重新加载 {len(files)} 个图片文件"]
+            if recursive:
+                parts.append("及其子目录")
+            if resolution_filter['enabled']:
+                parts.append(f"(分辨率≥{resolution_filter['min_width']}×{resolution_filter['min_height']})")
+            
+            status_text = "".join(parts)
+            self.status_label.config(text=status_text)
+        else:
+            # 没有文件时清空显示和缓存
+            self.processed_results.clear()
+            self.current_image_path = ""
+            self.file_path_var.set("")
+            self.original_label.config(image='', text="请选择图片文件")
+            self.original_resolution_label.config(text="")
+            self.processed_label.config(image='', text="等待处理")
+            self.processed_resolution_label.config(text="")
+            self.process_btn.config(state=tk.DISABLED)
+            self.prev_btn.config(state=tk.DISABLED)
+            self.next_btn.config(state=tk.DISABLED)
+            self.file_count_label.config(text="0/0")
+            self.batch_process_btn.config(state=tk.DISABLED)
+            
+            # 构建错误信息
+            error_parts = ["所选文件夹中没有找到支持的图片文件"]
+            if resolution_filter['enabled']:
+                error_parts.append(f"(分辨率要求≥{resolution_filter['min_width']}×{resolution_filter['min_height']})")
+            
+            self.status_label.config(text=" ".join(error_parts))
+    
+    def get_resolution_filter_config(self):
+        """获取分辨率过滤配置"""
+        return {
+            'enabled': self.resolution_filter_var.get(),
+            'min_width': int(self.min_width_var.get()),
+            'min_height': int(self.min_height_var.get())
+        }
+    
+    def get_sort_config(self):
+        """获取排序配置"""
+        sort_option_map = {
+            "按文件大小(大到小)": "file_size_desc",
+            "按文件大小(小到大)": "file_size_asc",
+            "按分辨率宽度(大到小)": "width_desc", 
+            "按分辨率宽度(小到大)": "width_asc",
+            "按分辨率高度(大到小)": "height_desc",
+            "按分辨率高度(小到大)": "height_asc",
+            "按文件名(A-Z)": "filename_asc",
+            "按文件名(Z-A)": "filename_desc"
+        }
+        selected_option = self.sort_option_var.get()
+        return sort_option_map.get(selected_option, "file_size_desc")
+    
+    def load_resolution_filter_config(self):
+        """加载分辨率过滤配置"""
+        try:
+            filter_config = self.config.get_resolution_filter_config()
+            self.resolution_filter_var.set(filter_config['enabled'])
+            self.min_width_var.set(str(filter_config['min_width']))
+            self.min_height_var.set(str(filter_config['min_height']))
+        except Exception as e:
+            print(f"加载分辨率过滤配置失败: {e}")
+    
+    def save_resolution_filter_config(self):
+        """保存分辨率过滤配置"""
+        try:
+            filter_config = self.get_resolution_filter_config()
+            self.config.set_resolution_filter_config(
+                filter_config['enabled'],
+                filter_config['min_width'],
+                filter_config['min_height']
+            )
+            self.config.save_config()
+        except Exception as e:
+            print(f"保存分辨率过滤配置失败: {e}")
+    
+    def save_sort_config(self):
+        """保存排序配置"""
+        try:
+            sort_config = self.get_sort_config()
+            self.config.set_sort_config(sort_config)
+            self.config.save_config()
+        except Exception as e:
+            print(f"保存排序配置失败: {e}")
+    
+    def load_sort_config(self):
+        """加载排序配置"""
+        try:
+            sort_config = self.config.get_sort_config()
+            # 将配置映射回UI显示文本
+            sort_option_map = {
+                "file_size_desc": "按文件大小(大到小)",
+                "file_size_asc": "按文件大小(小到大)", 
+                "width_desc": "按分辨率宽度(大到小)",
+                "width_asc": "按分辨率宽度(小到大)",
+                "height_desc": "按分辨率高度(大到小)",
+                "height_asc": "按分辨率高度(小到大)",
+                "filename_asc": "按文件名(A-Z)",
+                "filename_desc": "按文件名(Z-A)"
+            }
+            selected_option = sort_option_map.get(sort_config, "按文件大小(大到小)")
+            self.sort_option_var.set(selected_option)
+        except Exception as e:
+            print(f"加载排序配置失败: {e}")
     
     def load_image(self, image_path):
         """加载图片"""
@@ -992,6 +1250,9 @@ class ImageProcessorGUI:
             self.is_processing = False
             self.root.after(0, lambda: self.process_btn.config(state=tk.NORMAL))
             self.root.after(0, lambda: self.stop_btn.config(state=tk.DISABLED))
+            # 重新启用批量处理按钮
+            if self.file_manager.get_file_count() > 0:
+                self.root.after(0, lambda: self.batch_process_btn.config(state=tk.NORMAL))
     
     def on_process_complete(self, result, output_path):
         """处理完成时的回调"""

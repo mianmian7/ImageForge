@@ -97,3 +97,11 @@ class Config:
         self.set('enable_resolution_filter', str(enabled))
         self.set('min_resolution_width', str(min_width))
         self.set('min_resolution_height', str(min_height))
+    
+    def get_sort_config(self):
+        """获取排序配置"""
+        return self.get('file_sort_option', 'file_size_desc')
+    
+    def set_sort_config(self, sort_option: str):
+        """设置排序配置"""
+        self.set('file_sort_option', sort_option)
