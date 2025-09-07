@@ -142,8 +142,14 @@ class FileManager:
             filename = f"{name}{ext}"
         
         if output_mode == 'overwrite':
-            # 覆盖模式：如果格式不同，仍使用原路径（实际处理时会覆盖）
-            return input_path
+            # 覆盖模式：如果格式转换，需要使用新的文件名和扩展名
+            if output_format and output_format != "保持原格式":
+                # 格式转换时，构造新的文件路径（在同一目录下）
+                input_dir = os.path.dirname(input_path)
+                return os.path.join(input_dir, filename)
+            else:
+                # 无格式转换，直接覆盖原文件
+                return input_path
         
         elif output_mode == 'new_folder':
             input_dir = os.path.dirname(input_path)

@@ -331,6 +331,12 @@ class ImageProcessorGUI:
                                    width=12, state="readonly")
         format_combo.pack(side=tk.LEFT, padx=(0, 10))
         
+        # Meta覆盖选项
+        self.meta_override_var = tk.BooleanVar(value=False)
+        meta_override_checkbox = ttk.Checkbutton(button_frame, text="Meta覆盖", 
+                                               variable=self.meta_override_var)
+        meta_override_checkbox.pack(side=tk.LEFT, padx=(10, 0))
+        
     def create_asset_cleaner_panel(self, parent):
         """创建资源清理面板"""
         # 创建资源清理面板，传递统一的文件夹选择方法和同步回调
@@ -1182,6 +1188,10 @@ class ImageProcessorGUI:
                 # 为支持质量的格式添加默认质量参数
                 if output_format in ["JPEG", "WEBP"] and 'quality' not in params:
                     params['quality'] = 85
+        
+        # 添加Meta覆盖选项
+        if hasattr(self, 'meta_override_var'):
+            params['meta_override'] = self.meta_override_var.get()
         
         return params
     

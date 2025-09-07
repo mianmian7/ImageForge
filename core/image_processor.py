@@ -5,6 +5,8 @@
 
 import os
 import threading
+import json
+import shutil
 from typing import Dict, List, Optional, Callable, Any
 from utils.pillow_wrapper import PillowWrapper
 from utils.tinypng_client import TinyPNGClient
@@ -310,6 +312,21 @@ class ImageProcessor:
                         process_params.get('mode', 'optimize'),
                         process_params.get('scale')
                     )
+                elif process_type == 'format_convert':
+                    # 纯格式转换，不做其他处理，直接复制到临时文件
+                    import shutil
+                    shutil.copy2(input_path, temp_path)
+                    
+                    # 获取原始文件信息作为结果
+                    input_size = os.path.getsize(input_path)
+                    result = {
+                        'success': True,
+                        'error': None,
+                        'input_size': input_size,
+                        'output_size': input_size,  # 复制阶段大小不变
+                        'compression_ratio': 0,
+                        'original_info': {}
+                    }
                 else:
                     return {
                         'success': False,
@@ -334,6 +351,20 @@ class ImageProcessor:
                     
                     # 如果格式转换成功，组合结果
                     if format_result['success']:
+                        # 检查是否需要删除原文件（覆盖模式且格式转换）
+                        if input_path != output_path and os.path.exists(input_path):
+                            try:
+                                # 获取文件扩展名进行比较
+                                input_ext = os.path.splitext(input_path)[1].lower()
+                                output_ext = os.path.splitext(output_path)[1].lower()
+                                
+                                # 如果格式确实发生了转换，删除原文件
+                                if input_ext != output_ext:
+                                    os.remove(input_path)
+                            except Exception as e:
+                                # 删除原文件失败不影响整体成功，只记录到error信息中
+                                pass
+                        
                         # 保留原始输入大小，更新输出大小为最终格式转换后的大小
                         combined_result = {
                             'success': True,
@@ -343,6 +374,17 @@ class ImageProcessor:
                             'compression_ratio': (1 - format_result['output_size'] / result['input_size']) * 100,
                             'original_info': result.get('original_info', format_result.get('original_info', {}))
                         }
+                        
+                        # 处理Meta覆盖
+                        if process_params.get('meta_override', False):
+                            scale_factor = self._get_scale_factor(process_type, process_params)
+                            meta_success = self.process_meta_file(input_path, output_path, scale_factor)
+                            if meta_success:
+                                combined_result['meta_processed'] = True
+                            else:
+                                combined_result['meta_processed'] = False
+                                combined_result['meta_error'] = 'Meta文件处理失败'
+                        
                         return combined_result
                     else:
                         # 格式转换失败，返回前面的处理结果但包含格式转换错误
@@ -360,8 +402,9 @@ class ImageProcessor:
                     return result
             else:
                 # 不需要格式转换，直接处理
+                result = None
                 if process_type == 'resize':
-                    return self.resize_image(
+                    result = self.resize_image(
                         input_path, output_path,
                         process_params.get('resize_mode', 'percentage'),
                         process_params.get('resize_value', 50),
@@ -369,21 +412,33 @@ class ImageProcessor:
                         process_params.get('maintain_aspect', True)
                     )
                 elif process_type == 'compress':
-                    return self.compress_image_tinypng(input_path, output_path)
+                    result = self.compress_image_tinypng(input_path, output_path)
                 elif process_type == 'pillow_compress':
-                    return self.compress_image_pillow(
+                    result = self.compress_image_pillow(
                         input_path, output_path,
                         process_params.get('quality', 85),
                         process_params.get('mode', 'optimize'),
                         process_params.get('scale')
                     )
                 else:
-                    return {
+                    result = {
                         'success': False,
                         'error': f'不支持的处理类型: {process_type}',
                         'input_size': 0,
                         'output_size': 0
                     }
+                
+                # 处理Meta覆盖 (仅在处理成功时)
+                if result and result.get('success', False) and process_params.get('meta_override', False):
+                    scale_factor = self._get_scale_factor(process_type, process_params)
+                    meta_success = self.process_meta_file(input_path, output_path, scale_factor)
+                    if meta_success:
+                        result['meta_processed'] = True
+                    else:
+                        result['meta_processed'] = False
+                        result['meta_error'] = 'Meta文件处理失败'
+                
+                return result
                 
         except Exception as e:
             return {
@@ -492,3 +547,178 @@ class ImageProcessor:
             self.tinypng = TinyPNGClient(api_key)
         else:
             self.tinypng = None
+    
+    def process_meta_file(self, input_path: str, output_path: str, scale_factor: float = 1.0) -> bool:
+        """处理Cocos Creator meta文件
+        
+        Args:
+            input_path: 原始图片路径
+            output_path: 输出图片路径  
+            scale_factor: 缩放比例 (如50%则传入0.5)
+            
+        Returns:
+            bool: 是否处理成功
+        """
+        try:
+            # 构造meta文件路径
+            input_meta_path = input_path + ".meta"
+            output_meta_path = output_path + ".meta"
+            
+            # 检查原始meta文件是否存在
+            if not os.path.exists(input_meta_path):
+                return False
+            
+            # 如果输入和输出是同一个文件，直接修改
+            if input_meta_path == output_meta_path:
+                # 读取原始meta文件
+                with open(input_meta_path, 'r', encoding='utf-8') as f:
+                    meta_data = json.load(f)
+                
+                # 处理坐标缩放（如果需要）
+                if scale_factor != 1.0:
+                    self._scale_meta_coordinates(meta_data, scale_factor)
+                
+                # 写回同一个文件
+                with open(input_meta_path, 'w', encoding='utf-8') as f:
+                    json.dump(meta_data, f, indent=2, ensure_ascii=False)
+                    
+                return True
+            else:
+                # 读取原始meta文件
+                with open(input_meta_path, 'r', encoding='utf-8') as f:
+                    meta_data = json.load(f)
+                
+                # 更新文件格式标识
+                input_ext = os.path.splitext(input_path)[1]
+                output_ext = os.path.splitext(output_path)[1]
+                
+                if 'files' in meta_data and input_ext != output_ext:
+                    # 替换文件扩展名
+                    for i, file_ext in enumerate(meta_data['files']):
+                        if file_ext == input_ext:
+                            meta_data['files'][i] = output_ext
+                
+                # 处理顶点坐标缩放
+                if scale_factor != 1.0:
+                    self._scale_meta_coordinates(meta_data, scale_factor)
+                
+                # 写入新的meta文件（保留原始UUID）
+                with open(output_meta_path, 'w', encoding='utf-8') as f:
+                    json.dump(meta_data, f, indent=2, ensure_ascii=False)
+                
+                # 如果成功创建了新meta文件，删除原meta文件
+                if os.path.exists(output_meta_path) and input_meta_path != output_meta_path:
+                    try:
+                        os.remove(input_meta_path)
+                    except Exception as e:
+                        print(f"删除原meta文件失败: {e}")
+                
+                return True
+            
+        except Exception as e:
+            print(f"处理meta文件失败: {e}")
+            return False
+    
+    def _scale_meta_coordinates(self, meta_data: dict, scale_factor: float):
+        """缩放meta文件中的顶点坐标
+        
+        Args:
+            meta_data: meta数据字典
+            scale_factor: 缩放比例
+        """
+        def smart_scale(value, factor):
+            """智能缩放，保持整数或.5的数值"""
+            scaled = value * factor
+            # 先四舍五入到0.5的倍数
+            rounded = round(scaled * 2) / 2
+            # 如果原本就是整数，尽量保持整数
+            if abs(rounded - round(rounded)) < 0.001:  # 基本是整数
+                return float(round(rounded))
+            else:
+                return rounded
+        
+        try:
+            # 遍历subMetas寻找spriteFrame
+            if 'subMetas' in meta_data:
+                for sub_meta in meta_data['subMetas'].values():
+                    if sub_meta.get('importer') == 'sprite-frame' and 'userData' in sub_meta:
+                        user_data = sub_meta['userData']
+                        
+                        # 缩放尺寸相关属性（这些必须是整数）
+                        size_fields = ['width', 'height', 'rawWidth', 'rawHeight']
+                        for field in size_fields:
+                            if field in user_data:
+                                # 对于尺寸，确保结果是整数且尽量是偶数
+                                scaled_size = user_data[field] * scale_factor
+                                # 优先保持偶数，有利于2的幂次方
+                                rounded_size = round(scaled_size)
+                                if rounded_size % 2 != 0 and user_data[field] % 2 == 0:
+                                    # 原本是偶数，尽量保持偶数特性
+                                    if scaled_size > rounded_size:
+                                        rounded_size += 1
+                                    else:
+                                        rounded_size -= 1
+                                        
+                                user_data[field] = max(1, rounded_size)  # 确保至少为1
+                        
+                        # 缩放顶点坐标
+                        if 'vertices' in user_data:
+                            vertices = user_data['vertices']
+                            
+                            # 缩放rawPosition（允许.5的数值）
+                            if 'rawPosition' in vertices:
+                                for i in range(len(vertices['rawPosition'])):
+                                    vertices['rawPosition'][i] = smart_scale(
+                                        vertices['rawPosition'][i], scale_factor
+                                    )
+                            
+                            # 缩放UV坐标 (保持整数)
+                            if 'uv' in vertices:
+                                for i in range(len(vertices['uv'])):
+                                    vertices['uv'][i] = max(0, round(vertices['uv'][i] * scale_factor))
+                            
+                            # 缩放minPos和maxPos（允许.5的数值）
+                            if 'minPos' in vertices:
+                                for i in range(len(vertices['minPos'])):
+                                    vertices['minPos'][i] = smart_scale(
+                                        vertices['minPos'][i], scale_factor
+                                    )
+                            
+                            if 'maxPos' in vertices:
+                                for i in range(len(vertices['maxPos'])):
+                                    vertices['maxPos'][i] = smart_scale(
+                                        vertices['maxPos'][i], scale_factor
+                                    )
+                                    
+        except Exception as e:
+            print(f"缩放meta坐标失败: {e}")
+    
+    def _get_scale_factor(self, process_type: str, process_params: Dict[str, Any]) -> float:
+        """根据处理类型和参数获取缩放比例
+        
+        Args:
+            process_type: 处理类型
+            process_params: 处理参数
+            
+        Returns:
+            float: 缩放比例 (1.0表示无缩放)
+        """
+        if process_type == 'resize':
+            resize_mode = process_params.get('resize_mode', 'percentage')
+            if resize_mode == 'percentage':
+                # 百分比模式，直接返回比例
+                percentage = process_params.get('resize_value', 100)
+                return percentage / 100.0
+            else:
+                # 指定尺寸模式，需要从原图计算比例
+                # 这里返回1.0，因为需要原图尺寸信息才能计算精确比例
+                # 在实际使用时可以传入原图尺寸信息
+                return 1.0
+        elif process_type == 'pillow_compress':
+            # Pillow压缩如果有缩放参数
+            if process_params.get('mode') == 'resize_optimize':
+                scale = process_params.get('scale', 100)
+                return scale / 100.0
+        
+        # 其他情况不涉及尺寸变化
+        return 1.0
