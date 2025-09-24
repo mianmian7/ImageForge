@@ -49,7 +49,8 @@ class ImageProcessorGUI:
         # 加载配置
         self.load_resolution_filter_config()
         self.load_sort_config()
-        
+        self.load_format_filter_config()
+
         # 绑定分辨率过滤控件事件
         self.create_resolution_filter_controls()
     
@@ -157,26 +158,47 @@ class ImageProcessorGUI:
                                              foreground="gray", font=("Arial", 9))
         self.resolution_hint_label.pack(side=tk.LEFT, padx=(10, 0))
         
+        # 图片格式筛选选项
+        format_frame = ttk.Frame(file_frame)
+        format_frame.grid(row=3, column=0, columnspan=6, sticky=(tk.W, tk.E), pady=(2, 2))
+
+        ttk.Label(format_frame, text="图片格式:").pack(side=tk.LEFT, padx=(0, 10))
+
+        # 格式筛选选项
+        self.format_filter_var = tk.StringVar(value="全部格式")
+        format_combo = ttk.Combobox(format_frame, textvariable=self.format_filter_var,
+                                   values=["全部格式", "仅JPEG", "仅PNG", "仅BMP", "仅GIF", "仅TIFF", "仅WEBP"],
+                                   width=12, state="readonly")
+        format_combo.pack(side=tk.LEFT, padx=(0, 10))
+
+        # 格式筛选提示标签
+        self.format_hint_label = ttk.Label(format_frame, text="(选择要读取的图片格式类型)",
+                                         foreground="gray", font=("Arial", 9))
+        self.format_hint_label.pack(side=tk.LEFT, padx=(10, 0))
+
+        # 绑定格式变化事件
+        self.format_filter_var.trace('w', self.on_format_filter_change)
+
         # 文件排序选项
         sort_frame = ttk.Frame(file_frame)
-        sort_frame.grid(row=3, column=0, columnspan=6, sticky=(tk.W, tk.E), pady=(2, 2))
-        
+        sort_frame.grid(row=4, column=0, columnspan=6, sticky=(tk.W, tk.E), pady=(2, 2))
+
         ttk.Label(sort_frame, text="文件排序:").pack(side=tk.LEFT, padx=(0, 10))
-        
+
         self.sort_option_var = tk.StringVar(value="file_size_desc")
-        sort_combo = ttk.Combobox(sort_frame, textvariable=self.sort_option_var, 
-                                 values=["按文件大小(大到小)", "按文件大小(小到大)", 
-                                        "按分辨率宽度(大到小)", "按分辨率宽度(小到大)", 
+        sort_combo = ttk.Combobox(sort_frame, textvariable=self.sort_option_var,
+                                 values=["按文件大小(大到小)", "按文件大小(小到大)",
+                                        "按分辨率宽度(大到小)", "按分辨率宽度(小到大)",
                                         "按分辨率高度(大到小)", "按分辨率高度(小到大)",
-                                        "按文件名(A-Z)", "按文件名(Z-A)"], 
+                                        "按文件名(A-Z)", "按文件名(Z-A)"],
                                  width=18, state="readonly")
         sort_combo.pack(side=tk.LEFT, padx=(0, 10))
-        
+
         # 排序提示标签
-        self.sort_hint_label = ttk.Label(sort_frame, text="(选择文件列表排序方式)", 
+        self.sort_hint_label = ttk.Label(sort_frame, text="(选择文件列表排序方式)",
                                        foreground="gray", font=("Arial", 9))
         self.sort_hint_label.pack(side=tk.LEFT, padx=(10, 0))
-        
+
         # 绑定排序变化事件
         self.sort_option_var.trace('w', self.on_sort_option_change)
         
@@ -565,6 +587,15 @@ class ImageProcessorGUI:
         if self.file_manager.current_directory:
             self.reload_current_directory()
     
+    def on_format_filter_change(self, *args):
+        """处理图片格式筛选变化"""
+        # 保存格式筛选配置
+        self.save_format_filter_config()
+
+        # 如果已经有文件夹选择，重新加载文件并清空缓存
+        if self.file_manager.current_directory:
+            self.reload_current_directory()
+
     def on_sort_option_change(self, *args):
         """处理排序选项变化"""
         # 保存排序配置
@@ -652,14 +683,30 @@ class ImageProcessorGUI:
     
     def select_single_file(self):
         """选择单个文件"""
-        file_path = filedialog.askopenfilename(
-            title="选择图片文件",
-            filetypes=[
+        # 获取当前格式筛选配置
+        format_filter = self.get_format_filter_config()
+
+        # 构建文件类型过滤器
+        if format_filter:
+            # 如果有格式筛选，只显示选定的格式
+            format_patterns = [f"*{ext}" for ext in format_filter]
+            filter_name = self.format_filter_var.get().replace("仅", "")
+            filetypes = [
+                (f"{filter_name}文件", " ".join(format_patterns)),
+                ("所有文件", "*.*")
+            ]
+        else:
+            # 显示所有支持的格式
+            filetypes = [
                 ("图片文件", "*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp"),
                 ("所有文件", "*.*")
             ]
+
+        file_path = filedialog.askopenfilename(
+            title="选择图片文件",
+            filetypes=filetypes
         )
-        
+
         if file_path:
             # 清空处理结果缓存，因为选择了新的文件
             self.processed_results.clear()
@@ -672,13 +719,14 @@ class ImageProcessorGUI:
         if directory_path:
             # 同步到资源清理面板
             self.sync_to_asset_cleaner(directory_path)
-            
+
             recursive = self.recursive_var.get()
             resolution_filter = self.get_resolution_filter_config()
             sort_config = self.get_sort_config()
-            
+            format_filter = self.get_format_filter_config()
+
             files = self.file_manager.select_directory_with_filter_and_sort(
-                directory_path, recursive, resolution_filter, sort_config
+                directory_path, recursive, resolution_filter, sort_config, format_filter
             )
             
             if files:
@@ -696,7 +744,10 @@ class ImageProcessorGUI:
                     parts.append("及其子目录")
                 if resolution_filter['enabled']:
                     parts.append(f"(分辨率≥{resolution_filter['min_width']}×{resolution_filter['min_height']})")
-                
+                if format_filter:
+                    format_name = self.format_filter_var.get().replace("仅", "")
+                    parts.append(f"(仅{format_name}格式)")
+
                 status_text = "".join(parts)
                 self.status_label.config(text=status_text)
             else:
@@ -704,7 +755,10 @@ class ImageProcessorGUI:
                 error_parts = ["所选文件夹中没有找到支持的图片文件"]
                 if resolution_filter['enabled']:
                     error_parts.append(f"(分辨率要求≥{resolution_filter['min_width']}×{resolution_filter['min_height']})")
-                
+                if format_filter:
+                    format_name = self.format_filter_var.get().replace("仅", "")
+                    error_parts.append(f"(格式要求: {format_name})")
+
                 error_text = " ".join(error_parts)
                 messagebox.showwarning("无图片文件", error_text)
     
@@ -745,9 +799,10 @@ class ImageProcessorGUI:
             recursive = self.recursive_var.get()
             resolution_filter = self.get_resolution_filter_config()
             sort_config = self.get_sort_config()
-            
+            format_filter = self.get_format_filter_config()
+
             files = self.file_manager.select_directory_with_filter_and_sort(
-                directory_path, recursive, resolution_filter, sort_config
+                directory_path, recursive, resolution_filter, sort_config, format_filter
             )
             
             if files:
@@ -762,7 +817,10 @@ class ImageProcessorGUI:
                     parts.append("及其子目录")
                 if resolution_filter['enabled']:
                     parts.append(f"(分辨率≥{resolution_filter['min_width']}×{resolution_filter['min_height']})")
-                
+                if format_filter:
+                    format_name = self.format_filter_var.get().replace("仅", "")
+                    parts.append(f"(仅{format_name}格式)")
+
                 status_text = "".join(parts)
                 self.status_label.config(text=status_text)
             else:
@@ -782,7 +840,10 @@ class ImageProcessorGUI:
                 error_parts = [f"已同步到文件夹: {directory_path} (无支持的图片文件)"]
                 if resolution_filter['enabled']:
                     error_parts.append(f"(分辨率要求≥{resolution_filter['min_width']}×{resolution_filter['min_height']})")
-                
+                if format_filter:
+                    format_name = self.format_filter_var.get().replace("仅", "")
+                    error_parts.append(f"(格式要求: {format_name})")
+
                 status_text = " ".join(error_parts)
                 self.status_label.config(text=status_text)
     
@@ -821,9 +882,10 @@ class ImageProcessorGUI:
         recursive = self.recursive_var.get()
         resolution_filter = self.get_resolution_filter_config()
         sort_config = self.get_sort_config()
-        
+        format_filter = self.get_format_filter_config()
+
         files = self.file_manager.select_directory_with_filter_and_sort(
-            self.file_manager.current_directory, recursive, resolution_filter, sort_config
+            self.file_manager.current_directory, recursive, resolution_filter, sort_config, format_filter
         )
         
         if files:
@@ -846,7 +908,10 @@ class ImageProcessorGUI:
                 parts.append("及其子目录")
             if resolution_filter['enabled']:
                 parts.append(f"(分辨率≥{resolution_filter['min_width']}×{resolution_filter['min_height']})")
-            
+            if format_filter:
+                format_name = self.format_filter_var.get().replace("仅", "")
+                parts.append(f"(仅{format_name}格式)")
+
             status_text = "".join(parts)
             self.status_label.config(text=status_text)
         else:
@@ -868,7 +933,10 @@ class ImageProcessorGUI:
             error_parts = ["所选文件夹中没有找到支持的图片文件"]
             if resolution_filter['enabled']:
                 error_parts.append(f"(分辨率要求≥{resolution_filter['min_width']}×{resolution_filter['min_height']})")
-            
+            if format_filter:
+                format_name = self.format_filter_var.get().replace("仅", "")
+                error_parts.append(f"(格式要求: {format_name})")
+
             self.status_label.config(text=" ".join(error_parts))
     
     def get_resolution_filter_config(self):
@@ -879,6 +947,20 @@ class ImageProcessorGUI:
             'min_height': int(self.min_height_var.get())
         }
     
+    def get_format_filter_config(self):
+        """获取图片格式筛选配置"""
+        format_map = {
+            "全部格式": None,
+            "仅JPEG": ['.jpg', '.jpeg'],
+            "仅PNG": ['.png'],
+            "仅BMP": ['.bmp'],
+            "仅GIF": ['.gif'],
+            "仅TIFF": ['.tiff'],
+            "仅WEBP": ['.webp']
+        }
+        selected = self.format_filter_var.get()
+        return format_map.get(selected, None)
+
     def get_sort_config(self):
         """获取排序配置"""
         sort_option_map = {
@@ -917,6 +999,23 @@ class ImageProcessorGUI:
         except Exception as e:
             print(f"保存分辨率过滤配置失败: {e}")
     
+    def save_format_filter_config(self):
+        """保存格式筛选配置"""
+        try:
+            format_config = self.format_filter_var.get()
+            self.config.set('format_filter', format_config)
+            self.config.save_config()
+        except Exception as e:
+            print(f"保存格式筛选配置失败: {e}")
+
+    def load_format_filter_config(self):
+        """加载格式筛选配置"""
+        try:
+            format_config = self.config.get('format_filter', '全部格式')
+            self.format_filter_var.set(format_config)
+        except Exception as e:
+            print(f"加载格式筛选配置失败: {e}")
+
     def save_sort_config(self):
         """保存排序配置"""
         try:

@@ -27,9 +27,23 @@ class FileManager:
             return self.config.get_supported_formats()
         return ['.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.webp']
     
-    def is_image_file(self, file_path: str) -> bool:
-        """检查文件是否为支持的图片格式"""
+    def is_image_file(self, file_path: str, format_filter: List[str] = None) -> bool:
+        """检查文件是否为支持的图片格式
+
+        Args:
+            file_path: 文件路径
+            format_filter: 格式筛选列表，如 ['.jpg', '.png']。None 表示不筛选
+
+        Returns:
+            bool: 是否符合格式要求
+        """
         file_ext = Path(file_path).suffix.lower()
+
+        # 如果有格式筛选，检查是否在筛选列表中
+        if format_filter is not None:
+            return file_ext in format_filter
+
+        # 否则检查是否在支持的格式列表中
         return file_ext in self.get_supported_formats()
     
     def select_single_file(self, file_path: str) -> Optional[str]:
@@ -263,45 +277,81 @@ class FileManager:
         self.current_file_index = 0
         return self.current_files
     
-    def select_directory_with_filter_and_sort(self, directory_path: str, recursive: bool = True, 
-                                             resolution_filter: Dict[str, Any] = None, 
-                                             sort_config: str = None) -> List[str]:
+    def select_directory_with_filter_and_sort(self, directory_path: str, recursive: bool = True,
+                                             resolution_filter: Dict[str, Any] = None,
+                                             sort_config: str = None,
+                                             format_filter: List[str] = None) -> List[str]:
         """选择目录并获取所有支持的图片文件（带分辨率过滤和排序）
-        
+
         Args:
             directory_path: 目录路径
             recursive: 是否递归读取子目录
             resolution_filter: 分辨率过滤配置 {'enabled': bool, 'min_width': int, 'min_height': int}
             sort_config: 排序配置，支持的值：file_size_desc, file_size_asc, width_desc, width_asc, height_desc, height_asc, filename_asc, filename_desc
-            
+            format_filter: 格式筛选列表，如 ['.jpg', '.png']。None 表示不筛选
+
         Returns:
             list: 过滤和排序后的图片文件路径列表
         """
-        files = self.select_directory_with_filter(directory_path, recursive, resolution_filter)
-        
-        if sort_config and files:
+        if not os.path.isdir(directory_path):
+            return []
+
+        self.current_directory = directory_path
+        self.current_files = []
+
+        # 获取所有图片文件（应用格式筛选）
+        all_files = []
+        if recursive:
+            # 递归遍历所有子目录
+            for root, dirs, files in os.walk(directory_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    if self.is_image_file(file_path, format_filter):
+                        all_files.append(file_path)
+        else:
+            # 只遍历当前目录
+            for file in os.listdir(directory_path):
+                file_path = os.path.join(directory_path, file)
+                if os.path.isfile(file_path) and self.is_image_file(file_path, format_filter):
+                    all_files.append(file_path)
+
+        # 应用分辨率过滤
+        if resolution_filter and resolution_filter.get('enabled', False):
+            min_width = resolution_filter.get('min_width', 0)
+            min_height = resolution_filter.get('min_height', 0)
+
+            for file_path in all_files:
+                if self.check_image_resolution(file_path, min_width, min_height):
+                    self.current_files.append(file_path)
+        else:
+            # 不应用分辨率过滤
+            self.current_files = all_files
+
+        # 应用排序
+        if sort_config and self.current_files:
             # 根据排序配置进行排序
             if sort_config == "file_size_desc":
-                files.sort(key=lambda x: os.path.getsize(x), reverse=True)
+                self.current_files.sort(key=lambda x: os.path.getsize(x), reverse=True)
             elif sort_config == "file_size_asc":
-                files.sort(key=lambda x: os.path.getsize(x), reverse=False)
+                self.current_files.sort(key=lambda x: os.path.getsize(x), reverse=False)
             elif sort_config == "width_desc":
-                files.sort(key=lambda x: self.get_image_width(x), reverse=True)
+                self.current_files.sort(key=lambda x: self.get_image_width(x), reverse=True)
             elif sort_config == "width_asc":
-                files.sort(key=lambda x: self.get_image_width(x), reverse=False)
+                self.current_files.sort(key=lambda x: self.get_image_width(x), reverse=False)
             elif sort_config == "height_desc":
-                files.sort(key=lambda x: self.get_image_height(x), reverse=True)
+                self.current_files.sort(key=lambda x: self.get_image_height(x), reverse=True)
             elif sort_config == "height_asc":
-                files.sort(key=lambda x: self.get_image_height(x), reverse=False)
+                self.current_files.sort(key=lambda x: self.get_image_height(x), reverse=False)
             elif sort_config == "filename_asc":
-                files.sort(key=lambda x: os.path.basename(x).lower(), reverse=False)
+                self.current_files.sort(key=lambda x: os.path.basename(x).lower(), reverse=False)
             elif sort_config == "filename_desc":
-                files.sort(key=lambda x: os.path.basename(x).lower(), reverse=True)
+                self.current_files.sort(key=lambda x: os.path.basename(x).lower(), reverse=True)
             else:
                 # 默认按文件大小降序
-                files.sort(key=lambda x: os.path.getsize(x), reverse=True)
-        
-        return files
+                self.current_files.sort(key=lambda x: os.path.getsize(x), reverse=True)
+
+        self.current_file_index = 0
+        return self.current_files
     
     def get_image_width(self, file_path: str) -> int:
         """获取图片宽度"""
