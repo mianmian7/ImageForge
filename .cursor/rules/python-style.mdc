@@ -1,0 +1,196 @@
+---
+globs: *.py
+---
+
+# Python 代码规范
+
+## 通用编码规范
+
+### 代码风格
+- 遵循 **PEP 8** 规范
+- 使用 **4 个空格** 缩进（不使用 Tab）
+- 每行最大长度 **100 字符**（文档字符串 80 字符）
+- 类名使用 `PascalCase`，函数/变量使用 `snake_case`
+- 常量使用 `UPPER_SNAKE_CASE`
+
+### 注释规范
+- 使用 **中文注释** 说明业务逻辑
+- 使用 **英文注释** 说明技术实现细节
+- 每个模块顶部必须有模块文档字符串：
+  ```python
+  """
+  模块名称 - 简短描述
+  
+  详细说明模块功能和用途
+  """
+  ```
+- 每个类和公共函数必须有文档字符串：
+  ```python
+  def process_image(self, image_path: str, options: dict) -> bool:
+      """
+      处理图像文件
+      
+      Args:
+          image_path: 图像文件路径
+          options: 处理选项字典
+          
+      Returns:
+          bool: 处理是否成功
+          
+      Raises:
+          ValueError: 当图像格式不支持时
+          IOError: 当文件无法读取时
+      """
+  ```
+
+### 类型注解
+- 函数参数和返回值必须添加类型注解
+- 复杂类型使用 `typing` 模块（`Optional`, `Dict`, `List`, `Tuple`）
+- 示例：
+  ```python
+  from typing import Optional, Dict, List, Tuple
+  
+  def get_config(key: str, default: Optional[str] = None) -> str:
+      pass
+  
+  def batch_process(files: List[str]) -> Dict[str, bool]:
+      pass
+  ```
+
+## 错误处理
+
+### 异常处理原则
+- 使用 **具体的异常类型**，避免裸 `except`
+- 异常处理必须包含有意义的错误信息
+- 记录异常堆栈信息（使用 logging 模块）
+- 示例：
+  ```python
+  import logging
+  
+  try:
+      result = process_image(path)
+  except FileNotFoundError as e:
+      logging.error(f"文件未找到: {path}, 错误: {e}")
+      return False
+  except ValueError as e:
+      logging.error(f"无效的图像格式: {path}, 错误: {e}")
+      return False
+  except Exception as e:
+      logging.exception(f"处理图像时发生未知错误: {path}")
+      return False
+  ```
+
+### 资源管理
+- 文件操作必须使用 `with` 语句
+- 确保资源正确释放（文件句柄、网络连接、图像对象）
+- 示例：
+  ```python
+  with open(file_path, 'rb') as f:
+      data = f.read()
+  
+  with Image.open(image_path) as img:
+      img = img.resize((width, height))
+      img.save(output_path)
+  ```
+
+## 导入规范
+
+### 导入顺序
+1. 标准库导入
+2. 第三方库导入
+3. 本地模块导入
+
+每组之间用空行分隔：
+```python
+# 标准库
+import os
+import sys
+from typing import Optional, Dict
+
+# 第三方库
+from PIL import Image
+import requests
+
+# 本地模块
+from core.config import Config
+from utils.pillow_wrapper import PillowWrapper
+```
+
+### 导入规则
+- 优先使用 `from module import Class` 而不是 `import module`
+- 避免使用 `from module import *`
+- 相对导入仅在包内部使用
+
+## 函数和方法设计
+
+### 函数职责
+- **单一职责原则**：每个函数只做一件事
+- 函数行数建议不超过 **50 行**
+- 参数数量建议不超过 **5 个**（使用字典传递复杂参数）
+
+### 返回值规范
+- 明确的返回类型，避免返回 `None` 和其他类型混用
+- 错误情况返回空值或抛出异常，不要返回 `-1`、`False` 混用
+- 示例：
+  ```python
+  # 推荐：使用 Optional 明确可能为空
+  def find_config(key: str) -> Optional[str]:
+      return config.get(key) if key in config else None
+  
+  # 推荐：失败抛出异常
+  def load_image(path: str) -> Image.Image:
+      if not os.path.exists(path):
+          raise FileNotFoundError(f"图像文件不存在: {path}")
+      return Image.open(path)
+  ```
+
+## 性能优化
+
+### 图像处理优化
+- 大批量处理使用生成器而不是列表
+- 及时释放 PIL Image 对象（使用 `with` 或显式 `close()`）
+- 避免重复打开同一图像文件
+
+### 内存管理
+- 大文件处理使用流式读取
+- 批处理时分批加载，避免一次性加载所有文件到内存
+- 示例：
+  ```python
+  def process_batch(file_paths: List[str], batch_size: int = 10):
+      """分批处理图像文件"""
+      for i in range(0, len(file_paths), batch_size):
+          batch = file_paths[i:i + batch_size]
+          for path in batch:
+              process_single_image(path)
+          # 强制垃圾回收（可选）
+          import gc
+          gc.collect()
+  ```
+
+## 测试和调试
+
+### 调试信息
+- 使用 `logging` 模块而不是 `print`
+- 日志级别：DEBUG < INFO < WARNING < ERROR < CRITICAL
+- 示例：
+  ```python
+  import logging
+  
+  logging.debug("开始处理图像: %s", image_path)
+  logging.info("图像处理成功: %s", image_path)
+  logging.warning("图像质量低于阈值: %s", image_path)
+  logging.error("无法处理图像: %s, 错误: %s", image_path, error)
+  ```
+
+### 参数验证
+- 公共 API 必须验证参数有效性
+- 尽早失败（fail fast）原则
+- 示例：
+  ```python
+  def resize_image(image_path: str, width: int, height: int):
+      if not os.path.exists(image_path):
+          raise FileNotFoundError(f"图像文件不存在: {image_path}")
+      if width <= 0 or height <= 0:
+          raise ValueError(f"无效的尺寸: {width}x{height}")
+      # 继续处理...
+  ```

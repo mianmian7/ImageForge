@@ -1,0 +1,403 @@
+---
+description: 配置管理和 config.ini 使用规范
+---
+
+# 配置管理规范
+
+## 配置文件结构
+
+### config.ini 标准格式
+参考项目根目录的 [config.ini](mdc:config.ini)：
+```ini
+[tinypng]
+# TinyPNG API 密钥（在 https://tinypng.com/developers 获取）
+api_key = your_api_key_here
+
+[processing]
+# 默认压缩质量 (1-100)
+default_compression = 80
+# 最大文件大小限制（MB）
+max_file_size_mb = 10
+# 支持的图像格式（逗号分隔）
+supported_formats = jpeg,png,bmp,gif,tiff,webp
+
+[ui]
+# 窗口默认宽度
+window_width = 1200
+# 窗口默认高度
+window_height = 800
+# 预览图最大尺寸
+preview_max_size = 300
+
+[paths]
+# 默认输出目录
+default_output_dir = ./output
+# 临时文件目录
+temp_dir = ./temp
+
+[logging]
+# 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+log_level = INFO
+# 日志文件路径
+log_file = imageforge.log
+```
+
+## Config 类设计
+
+### 配置管理器实现
+参考 [core/config.py](mdc:core/config.py)：
+```python
+import configparser
+import os
+from typing import Any, Optional
+
+class Config:
+    """配置管理器"""
+    
+    DEFAULT_CONFIG = {
+        'tinypng': {
+            'api_key': '',
+        },
+        'processing': {
+            'default_compression': '80',
+            'max_file_size_mb': '10',
+            'supported_formats': 'jpeg,png,bmp,gif,tiff,webp',
+        },
+        'ui': {
+            'window_width': '1200',
+            'window_height': '800',
+            'preview_max_size': '300',
+        },
+        'paths': {
+            'default_output_dir': './output',
+            'temp_dir': './temp',
+        },
+        'logging': {
+            'log_level': 'INFO',
+            'log_file': 'imageforge.log',
+        }
+    }
+    
+    def __init__(self, config_file: str = 'config.ini'):
+        """
+        初始化配置管理器
+        
+        Args:
+            config_file: 配置文件路径
+        """
+        self.config_file = config_file
+        self.parser = configparser.ConfigParser()
+        self._load_config()
+    
+    def _load_config(self):
+        """加载配置文件，如果不存在则创建默认配置"""
+        if os.path.exists(self.config_file):
+            self.parser.read(self.config_file, encoding='utf-8')
+            self._merge_defaults()
+        else:
+            self._create_default_config()
+    
+    def _create_default_config(self):
+        """创建默认配置文件"""
+        for section, options in self.DEFAULT_CONFIG.items():
+            self.parser.add_section(section)
+            for key, value in options.items():
+                self.parser.set(section, key, value)
+        
+        self.save()
+    
+    def _merge_defaults(self):
+        """合并默认配置（处理新增配置项）"""
+        for section, options in self.DEFAULT_CONFIG.items():
+            if not self.parser.has_section(section):
+                self.parser.add_section(section)
+            
+            for key, default_value in options.items():
+                if not self.parser.has_option(section, key):
+                    self.parser.set(section, key, default_value)
+    
+    def get(self, key: str, section: str = 'processing', 
+            default: Optional[str] = None) -> str:
+        """
+        获取配置值
+        
+        Args:
+            key: 配置键
+            section: 配置节
+            default: 默认值
+            
+        Returns:
+            str: 配置值
+        """
+        try:
+            return self.parser.get(section, key)
+        except (configparser.NoSectionError, configparser.NoOptionError):
+            return default if default is not None else ''
+    
+    def get_int(self, key: str, section: str = 'processing', 
+                default: int = 0) -> int:
+        """获取整数配置值"""
+        try:
+            return self.parser.getint(section, key)
+        except (configparser.NoSectionError, configparser.NoOptionError, ValueError):
+            return default
+    
+    def get_float(self, key: str, section: str = 'processing', 
+                  default: float = 0.0) -> float:
+        """获取浮点数配置值"""
+        try:
+            return self.parser.getfloat(section, key)
+        except (configparser.NoSectionError, configparser.NoOptionError, ValueError):
+            return default
+    
+    def get_bool(self, key: str, section: str = 'processing', 
+                 default: bool = False) -> bool:
+        """获取布尔值配置"""
+        try:
+            return self.parser.getboolean(section, key)
+        except (configparser.NoSectionError, configparser.NoOptionError, ValueError):
+            return default
+    
+    def get_list(self, key: str, section: str = 'processing',
+                 separator: str = ',', default: list = None) -> list:
+        """获取列表配置值（逗号分隔）"""
+        try:
+            value = self.parser.get(section, key)
+            return [item.strip() for item in value.split(separator) if item.strip()]
+        except (configparser.NoSectionError, configparser.NoOptionError):
+            return default if default is not None else []
+    
+    def set(self, key: str, value: Any, section: str = 'processing'):
+        """
+        设置配置值
+        
+        Args:
+            key: 配置键
+            value: 配置值
+            section: 配置节
+        """
+        if not self.parser.has_section(section):
+            self.parser.add_section(section)
+        
+        self.parser.set(section, key, str(value))
+    
+    def save(self):
+        """保存配置到文件"""
+        with open(self.config_file, 'w', encoding='utf-8') as f:
+            self.parser.write(f)
+    
+    def reload(self):
+        """重新加载配置文件"""
+        self.parser = configparser.ConfigParser()
+        self._load_config()
+```
+
+## 配置使用示例
+
+### 在核心模块中使用配置
+```python
+from core.config import Config
+
+class ImageProcessor:
+    """图像处理器"""
+    
+    def __init__(self, config: Config):
+        self.config = config
+        
+        # 读取配置
+        self.default_quality = self.config.get_int('default_compression', 'processing', 80)
+        self.max_file_size = self.config.get_int('max_file_size_mb', 'processing', 10)
+        self.supported_formats = self.config.get_list('supported_formats', 'processing')
+        
+        # TinyPNG API 配置
+        self.tinypng_api_key = self.config.get('api_key', 'tinypng')
+```
+
+### 在 GUI 中使用配置
+```python
+from core.config import Config
+
+class MainWindow:
+    """主窗口"""
+    
+    def __init__(self, root, config: Config):
+        self.root = root
+        self.config = config
+        
+        # 读取 UI 配置
+        width = self.config.get_int('window_width', 'ui', 1200)
+        height = self.config.get_int('window_height', 'ui', 800)
+        self.root.geometry(f"{width}x{height}")
+        
+        # 保存窗口大小到配置
+        self.root.bind('<Configure>', self._on_window_resize)
+    
+    def _on_window_resize(self, event):
+        """窗口大小变化时保存配置"""
+        if event.widget == self.root:
+            self.config.set('window_width', self.root.winfo_width(), 'ui')
+            self.config.set('window_height', self.root.winfo_height(), 'ui')
+            self.config.save()
+```
+
+### 用户偏好设置
+```python
+class SettingsDialog:
+    """设置对话框"""
+    
+    def __init__(self, parent, config: Config):
+        self.config = config
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("设置")
+        
+        # 创建设置表单
+        self._create_settings_form()
+        
+        # 加载当前配置
+        self._load_current_settings()
+    
+    def _create_settings_form(self):
+        """创建设置表单"""
+        # TinyPNG API Key
+        tk.Label(self.dialog, text="TinyPNG API Key:").grid(row=0, column=0)
+        self.api_key_entry = tk.Entry(self.dialog, width=40)
+        self.api_key_entry.grid(row=0, column=1)
+        
+        # 默认压缩质量
+        tk.Label(self.dialog, text="默认压缩质量 (1-100):").grid(row=1, column=0)
+        self.quality_spinbox = tk.Spinbox(self.dialog, from_=1, to=100)
+        self.quality_spinbox.grid(row=1, column=1)
+        
+        # 保存按钮
+        tk.Button(self.dialog, text="保存", command=self._save_settings).grid(row=2, column=1)
+    
+    def _load_current_settings(self):
+        """加载当前配置"""
+        api_key = self.config.get('api_key', 'tinypng')
+        self.api_key_entry.insert(0, api_key)
+        
+        quality = self.config.get_int('default_compression', 'processing', 80)
+        self.quality_spinbox.delete(0, tk.END)
+        self.quality_spinbox.insert(0, str(quality))
+    
+    def _save_settings(self):
+        """保存设置"""
+        # 保存 API Key
+        api_key = self.api_key_entry.get().strip()
+        self.config.set('api_key', api_key, 'tinypng')
+        
+        # 保存压缩质量
+        try:
+            quality = int(self.quality_spinbox.get())
+            if 1 <= quality <= 100:
+                self.config.set('default_compression', quality, 'processing')
+            else:
+                messagebox.showwarning("警告", "压缩质量必须在 1-100 之间")
+                return
+        except ValueError:
+            messagebox.showerror("错误", "请输入有效的数字")
+            return
+        
+        # 保存到文件
+        self.config.save()
+        messagebox.showinfo("成功", "设置已保存")
+        self.dialog.destroy()
+```
+
+## 配置验证
+
+### 启动时配置验证
+```python
+def validate_config(config: Config) -> bool:
+    """
+    验证配置有效性
+    
+    Args:
+        config: 配置对象
+        
+    Returns:
+        bool: 配置是否有效
+    """
+    errors = []
+    
+    # 验证压缩质量
+    quality = config.get_int('default_compression', 'processing', 80)
+    if not 1 <= quality <= 100:
+        errors.append("压缩质量必须在 1-100 之间")
+    
+    # 验证最大文件大小
+    max_size = config.get_int('max_file_size_mb', 'processing', 10)
+    if max_size <= 0:
+        errors.append("最大文件大小必须大于 0")
+    
+    # 验证输出目录
+    output_dir = config.get('default_output_dir', 'paths')
+    if output_dir and not os.path.exists(output_dir):
+        try:
+            os.makedirs(output_dir, exist_ok=True)
+        except Exception as e:
+            errors.append(f"无法创建输出目录: {e}")
+    
+    # 显示错误
+    if errors:
+        error_message = "\n".join(errors)
+        messagebox.showerror("配置错误", f"配置文件存在以下问题：\n{error_message}")
+        return False
+    
+    return True
+```
+
+## 配置迁移
+
+### 处理配置版本升级
+```python
+class ConfigMigration:
+    """配置迁移工具"""
+    
+    @staticmethod
+    def migrate_to_v2(config: Config):
+        """迁移到 v2 配置格式"""
+        # 添加新的配置项
+        if not config.parser.has_section('logging'):
+            config.parser.add_section('logging')
+            config.set('log_level', 'INFO', 'logging')
+            config.set('log_file', 'imageforge.log', 'logging')
+        
+        # 重命名旧的配置项
+        if config.parser.has_option('processing', 'quality'):
+            old_value = config.get('quality', 'processing')
+            config.set('default_compression', old_value, 'processing')
+            config.parser.remove_option('processing', 'quality')
+        
+        config.save()
+```
+
+## 环境变量支持
+
+### 从环境变量读取敏感配置
+```python
+import os
+
+class Config:
+    """配置管理器（支持环境变量）"""
+    
+    def get(self, key: str, section: str = 'processing', 
+            default: Optional[str] = None) -> str:
+        """
+        获取配置值（优先从环境变量读取）
+        
+        环境变量命名格式: IMAGEFORGE_<SECTION>_<KEY>
+        例如: IMAGEFORGE_TINYPNG_API_KEY
+        """
+        # 尝试从环境变量读取
+        env_key = f"IMAGEFORGE_{section.upper()}_{key.upper()}"
+        env_value = os.getenv(env_key)
+        if env_value is not None:
+            return env_value
+        
+        # 从配置文件读取
+        try:
+            return self.parser.get(section, key)
+        except (configparser.NoSectionError, configparser.NoOptionError):
+            return default if default is not None else ''
+```

@@ -1,0 +1,377 @@
+---
+description: 测试、调试和日志规范
+---
+
+# 测试和调试规范
+
+## 日志系统
+
+### 日志配置
+```python
+import logging
+import os
+from logging.handlers import RotatingFileHandler
+
+def setup_logging(log_level: str = 'INFO', log_file: str = 'imageforge.log'):
+    """
+    配置日志系统
+    
+    Args:
+        log_level: 日志级别 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+        log_file: 日志文件路径
+    """
+    # 创建日志目录
+    log_dir = os.path.dirname(log_file)
+    if log_dir and not os.path.exists(log_dir):
+        os.makedirs(log_dir, exist_ok=True)
+    
+    # 配置根日志记录器
+    logger = logging.getLogger()
+    logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
+    
+    # 清除现有处理器
+    logger.handlers.clear()
+    
+    # 文件处理器（滚动日志，最大 10MB，保留 5 个备份）
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=10 * 1024 * 1024,  # 10 MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    file_handler.setLevel(logging.DEBUG)
+    file_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    file_handler.setFormatter(file_formatter)
+    logger.addHandler(file_handler)
+    
+    # 控制台处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_formatter = logging.Formatter(
+        '%(levelname)s: %(message)s'
+    )
+    console_handler.setFormatter(console_formatter)
+    logger.addHandler(console_handler)
+    
+    logging.info(f"日志系统已初始化，级别: {log_level}, 文件: {log_file}")
+```
+
+### 模块日志使用
+```python
+import logging
+
+# 为每个模块创建专用日志记录器
+logger = logging.getLogger(__name__)
+
+class ImageProcessor:
+    """图像处理器"""
+    
+    def process_image(self, image_path: str):
+        """处理图像"""
+        logger.debug(f"开始处理图像: {image_path}")
+        
+        try:
+            # 处理逻辑
+            result = self._do_processing(image_path)
+            logger.info(f"图像处理成功: {image_path}, 压缩率: {result.compression_ratio:.2f}%")
+            return result
+            
+        except FileNotFoundError:
+            logger.error(f"图像文件不存在: {image_path}")
+            raise
+            
+        except ValueError as e:
+            logger.warning(f"图像格式不支持: {image_path}, 错误: {e}")
+            raise
+            
+        except Exception as e:
+            logger.exception(f"处理图像时发生未知错误: {image_path}")
+            raise
+```
+
+### 日志级别使用指南
+- **DEBUG**: 详细的调试信息（开发阶段使用）
+  ```python
+  logger.debug(f"加载配置文件: {config_file}")
+  logger.debug(f"图像尺寸: {width}x{height}, 格式: {format}")
+  ```
+
+- **INFO**: 重要的业务流程信息
+  ```python
+  logger.info(f"开始批量处理 {len(files)} 个文件")
+  logger.info(f"处理完成，成功: {success_count}, 失败: {fail_count}")
+  ```
+
+- **WARNING**: 警告信息（不影响主流程）
+  ```python
+  logger.warning(f"图像质量较低: {image_path}, DPI: {dpi}")
+  logger.warning(f"API 调用次数接近配额限制: {count}/500")
+  ```
+
+- **ERROR**: 错误信息（影响单个操作）
+  ```python
+  logger.error(f"无法压缩图像: {image_path}, 错误: {error}")
+  logger.error(f"TinyPNG API 调用失败: {response.status_code}")
+  ```
+
+- **CRITICAL**: 严重错误（影响整个程序）
+  ```python
+  logger.critical(f"配置文件损坏，无法启动程序")
+  logger.critical(f"磁盘空间不足，无法继续处理")
+  ```
+
+## 调试技巧
+
+### 使用 pdb 调试
+```python
+import pdb
+
+def process_image(image_path: str):
+    """处理图像"""
+    # 在关键位置设置断点
+    pdb.set_trace()
+    
+    # 继续执行代码
+    result = do_something(image_path)
+    return result
+```
+
+### 断言和前置条件检查
+```python
+def resize_image(width: int, height: int):
+    """调整图像大小"""
+    # 使用断言检查开发时的错误
+    assert width > 0, f"宽度必须大于 0，当前值: {width}"
+    assert height > 0, f"高度必须大于 0，当前值: {height}"
+    
+    # 使用异常检查运行时错误
+    if width > 10000 or height > 10000:
+        raise ValueError(f"尺寸过大: {width}x{height}")
+```
+
+### 性能分析
+```python
+import time
+import functools
+
+def timing_decorator(func):
+    """函数执行时间装饰器"""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        
+        logger.debug(f"{func.__name__} 执行时间: {end_time - start_time:.3f} 秒")
+        return result
+    
+    return wrapper
+
+@timing_decorator
+def process_large_image(image_path: str):
+    """处理大图像"""
+    # 处理逻辑
+    pass
+```
+
+## 手动测试
+
+### 测试脚本示例
+创建独立的测试脚本验证功能：
+```python
+#!/usr/bin/env python3
+"""
+测试脚本：验证图像压缩功能
+"""
+
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from core.config import Config
+from core.image_processor import ImageProcessor
+from utils.pillow_wrapper import PillowWrapper
+
+def test_compress():
+    """测试压缩功能"""
+    print("=== 测试图像压缩 ===")
+    
+    # 准备测试数据
+    test_image = "sample/test.jpg"
+    output_image = "sample/test_compressed.jpg"
+    
+    if not os.path.exists(test_image):
+        print(f"错误: 测试图像不存在: {test_image}")
+        return False
+    
+    # 执行压缩
+    config = Config()
+    processor = PillowWrapper()
+    
+    print(f"输入图像: {test_image}")
+    print(f"输入大小: {os.path.getsize(test_image) / 1024:.2f} KB")
+    
+    success = processor.compress(test_image, output_image, quality=80)
+    
+    if success:
+        print(f"输出图像: {output_image}")
+        print(f"输出大小: {os.path.getsize(output_image) / 1024:.2f} KB")
+        
+        input_size = os.path.getsize(test_image)
+        output_size = os.path.getsize(output_image)
+        ratio = (1 - output_size / input_size) * 100
+        print(f"压缩率: {ratio:.2f}%")
+        
+        print("✓ 压缩测试通过")
+        return True
+    else:
+        print("✗ 压缩测试失败")
+        return False
+
+def test_resize():
+    """测试调整大小功能"""
+    print("\n=== 测试图像调整大小 ===")
+    
+    test_image = "sample/test.jpg"
+    output_image = "sample/test_resized.jpg"
+    
+    if not os.path.exists(test_image):
+        print(f"错误: 测试图像不存在: {test_image}")
+        return False
+    
+    processor = PillowWrapper()
+    success = processor.resize(test_image, output_image, 800, 600, keep_aspect=True)
+    
+    if success:
+        print(f"输出图像: {output_image}")
+        print("✓ 调整大小测试通过")
+        return True
+    else:
+        print("✗ 调整大小测试失败")
+        return False
+
+def main():
+    """运行所有测试"""
+    print("开始测试 ImageForge 功能\n")
+    
+    results = []
+    results.append(("压缩", test_compress()))
+    results.append(("调整大小", test_resize()))
+    
+    # 显示测试结果
+    print("\n" + "=" * 50)
+    print("测试结果汇总:")
+    for name, result in results:
+        status = "✓ 通过" if result else "✗ 失败"
+        print(f"  {name}: {status}")
+    
+    # 返回状态码
+    all_passed = all(result for _, result in results)
+    sys.exit(0 if all_passed else 1)
+
+if __name__ == "__main__":
+    main()
+```
+
+### 测试数据准备
+- 在 `sample/` 目录放置测试图像
+- 包含不同格式：JPEG, PNG, WebP
+- 包含不同尺寸：小图、大图、超大图
+- 包含边缘情况：透明 PNG、动画 GIF
+
+## 错误报告
+
+### 用户友好的错误信息
+```python
+from tkinter import messagebox
+
+def show_user_error(error_type: str, details: str):
+    """
+    显示用户友好的错误信息
+    
+    Args:
+        error_type: 错误类型
+        details: 错误详情
+    """
+    error_messages = {
+        'file_not_found': "找不到指定的图像文件。请检查文件是否存在。",
+        'invalid_format': "不支持的图像格式。支持的格式: JPEG, PNG, WebP, BMP, GIF, TIFF。",
+        'permission_denied': "没有权限访问文件。请检查文件权限。",
+        'api_error': "TinyPNG API 调用失败。请检查 API 密钥或网络连接。",
+        'disk_full': "磁盘空间不足。请清理磁盘空间后重试。",
+    }
+    
+    message = error_messages.get(error_type, "发生未知错误。")
+    full_message = f"{message}\n\n详细信息:\n{details}"
+    
+    messagebox.showerror("错误", full_message)
+    logger.error(f"显示错误信息: {error_type}, {details}")
+```
+
+### 崩溃报告收集
+```python
+import sys
+import traceback
+
+def exception_handler(exc_type, exc_value, exc_traceback):
+    """
+    全局异常处理器
+    
+    捕获未处理的异常并记录日志
+    """
+    if issubclass(exc_type, KeyboardInterrupt):
+        # 用户中断，正常退出
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    
+    # 记录异常堆栈
+    logger.critical("未处理的异常:", exc_info=(exc_type, exc_value, exc_traceback))
+    
+    # 显示友好的错误信息
+    error_msg = f"程序发生严重错误：\n{exc_type.__name__}: {exc_value}\n\n"
+    error_msg += "详细错误信息已记录到日志文件。"
+    messagebox.showerror("程序错误", error_msg)
+
+# 注册全局异常处理器
+sys.excepthook = exception_handler
+```
+
+## 开发环境配置
+
+### 开发模式 vs 生产模式
+```python
+import os
+
+# 检测是否为开发模式
+IS_DEVELOPMENT = os.getenv('IMAGEFORGE_ENV') == 'development'
+
+if IS_DEVELOPMENT:
+    # 开发模式：启用详细日志和调试功能
+    setup_logging('DEBUG', 'imageforge_dev.log')
+    logger.info("运行在开发模式")
+else:
+    # 生产模式：使用正常日志级别
+    setup_logging('INFO', 'imageforge.log')
+```
+
+### 调试辅助工具
+```python
+def debug_print_object(obj, name: str = "对象"):
+    """打印对象的所有属性（调试用）"""
+    if not IS_DEVELOPMENT:
+        return
+    
+    print(f"\n=== {name} ===")
+    for attr in dir(obj):
+        if not attr.startswith('_'):
+            try:
+                value = getattr(obj, attr)
+                if not callable(value):
+                    print(f"  {attr}: {value}")
+            except:
+                pass
+    print("=" * (len(name) + 8))
+```

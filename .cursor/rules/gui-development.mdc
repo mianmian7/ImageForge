@@ -1,0 +1,335 @@
+---
+globs: gui/**/*.py
+---
+
+# GUI 开发规范
+
+## tkinter GUI 编程原则
+
+### 架构设计
+- **分离关注点**：UI 逻辑与业务逻辑严格分离
+- **管理器模式**：功能模块化为独立的管理器类（参考 `gui/managers/`）
+- **组件复用**：创建可复用的自定义 Widget 类
+- GUI 代码仅负责：
+  1. 界面渲染和布局
+  2. 用户交互响应
+  3. 调用核心业务逻辑
+  4. 显示处理结果
+
+### 主窗口结构
+参考 [gui/main_window.py](mdc:gui/main_window.py) 的设计：
+```python
+class ImageProcessorGUI:
+    """主窗口类：负责应用程序整体布局和管理器协调"""
+    
+    def __init__(self, root, config):
+        self.root = root
+        self.config = config
+        
+        # 初始化各个管理器
+        self.main_view_manager = MainViewManager(root)
+        self.file_manager = FileManagerView(root)
+        self.preview_manager = PreviewManager(root)
+        self.process_control = ProcessControlManager(root)
+        self.status_bar = StatusBarManager(root)
+        
+        # 设置布局
+        self._setup_layout()
+        
+        # 绑定事件
+        self._bind_events()
+```
+
+## 管理器模块化
+
+### 管理器职责划分
+每个管理器负责一个独立的功能区域：
+- **MainViewManager**: 主视图布局和协调
+- **FileManagerView**: 文件选择和列表显示
+- **PreviewManager**: 图像预览和缩略图
+- **ProcessControlManager**: 处理控制按钮和选项
+- **StatusBarManager**: 状态栏和进度显示
+
+### 管理器基本结构
+```python
+class ExampleManager:
+    """功能管理器示例"""
+    
+    def __init__(self, parent: tk.Widget, config: Config):
+        """
+        初始化管理器
+        
+        Args:
+            parent: 父窗口组件
+            config: 配置对象
+        """
+        self.parent = parent
+        self.config = config
+        self.widgets = {}  # 存储创建的组件
+        
+        self._create_widgets()
+        self._setup_layout()
+    
+    def _create_widgets(self):
+        """创建所有 UI 组件（私有方法）"""
+        self.widgets['frame'] = tk.Frame(self.parent)
+        self.widgets['button'] = tk.Button(
+            self.widgets['frame'],
+            text="按钮",
+            command=self._on_button_click
+        )
+    
+    def _setup_layout(self):
+        """设置组件布局（私有方法）"""
+        self.widgets['frame'].pack(fill=tk.BOTH, expand=True)
+        self.widgets['button'].pack(pady=10)
+    
+    def _on_button_click(self):
+        """按钮点击事件处理（私有方法）"""
+        # 调用业务逻辑
+        result = self._call_business_logic()
+        # 更新 UI
+        self.update_display(result)
+    
+    def _call_business_logic(self):
+        """调用核心业务逻辑（私有方法）"""
+        # 从 core/ 模块调用业务逻辑
+        from core.image_processor import ImageProcessor
+        processor = ImageProcessor(self.config)
+        return processor.process()
+    
+    def update_display(self, data):
+        """更新显示内容（公共方法）"""
+        # 更新 UI 显示
+        pass
+    
+    def get_user_input(self) -> dict:
+        """获取用户输入（公共方法）"""
+        return {
+            'option1': self.widgets['entry1'].get(),
+            'option2': self.widgets['checkbox1'].get()
+        }
+```
+
+## 布局管理
+
+### 推荐的布局管理器
+1. **pack**: 简单的垂直/水平布局
+2. **grid**: 表格式布局（推荐用于表单）
+3. **place**: 绝对定位（谨慎使用）
+
+### 响应式布局
+使用 `pack` 和 `grid` 的 weight 参数实现窗口大小变化时的自适应：
+```python
+# 使用 pack 实现响应式
+frame.pack(fill=tk.BOTH, expand=True)
+
+# 使用 grid 实现响应式
+frame.grid(row=0, column=0, sticky='nsew')
+parent.grid_rowconfigure(0, weight=1)
+parent.grid_columnconfigure(0, weight=1)
+```
+
+### 间距和对齐
+- 使用 `padx`, `pady` 设置外边距
+- 使用 `ipadx`, `ipady` 设置内边距
+- 使用 `sticky` 控制对齐方式（n, s, e, w）
+
+## 用户交互
+
+### 事件绑定
+```python
+# 按钮点击
+button.config(command=self._on_button_click)
+
+# 键盘事件
+entry.bind('<Return>', self._on_enter_pressed)
+
+# 鼠标事件
+canvas.bind('<Button-1>', self._on_left_click)
+canvas.bind('<Double-Button-1>', self._on_double_click)
+
+# 窗口事件
+root.bind('<Configure>', self._on_window_resize)
+```
+
+### 输入验证
+```python
+def _validate_numeric_input(self, value: str) -> bool:
+    """验证数字输入"""
+    if value == "":
+        return True
+    try:
+        int(value)
+        return True
+    except ValueError:
+        return False
+
+# 创建验证器
+vcmd = (root.register(self._validate_numeric_input), '%P')
+entry = tk.Entry(root, validate='key', validatecommand=vcmd)
+```
+
+### 对话框使用
+```python
+from tkinter import messagebox, filedialog
+
+# 信息对话框
+messagebox.showinfo("标题", "信息内容")
+messagebox.showwarning("警告", "警告信息")
+messagebox.showerror("错误", "错误信息")
+
+# 确认对话框
+if messagebox.askyesno("确认", "确定要执行操作吗？"):
+    # 用户点击了"是"
+    pass
+
+# 文件选择对话框
+file_path = filedialog.askopenfilename(
+    title="选择图像文件",
+    filetypes=[("图像文件", "*.png *.jpg *.jpeg"), ("所有文件", "*.*")]
+)
+
+# 目录选择对话框
+dir_path = filedialog.askdirectory(title="选择输出目录")
+```
+
+## 图像显示
+
+### 使用 PIL 和 ImageTk 显示图像
+```python
+from PIL import Image, ImageTk
+import tkinter as tk
+
+class ImageDisplay:
+    """图像显示组件"""
+    
+    def display_image(self, image_path: str, max_width: int = 300, max_height: int = 300):
+        """
+        显示图像（自动缩放到最大尺寸）
+        
+        Args:
+            image_path: 图像文件路径
+            max_width: 最大显示宽度
+            max_height: 最大显示高度
+        """
+        try:
+            # 打开图像
+            image = Image.open(image_path)
+            
+            # 计算缩放比例
+            ratio = min(max_width / image.width, max_height / image.height)
+            if ratio < 1:
+                new_size = (int(image.width * ratio), int(image.height * ratio))
+                image = image.resize(new_size, Image.Resampling.LANCZOS)
+            
+            # 转换为 PhotoImage
+            photo = ImageTk.PhotoImage(image)
+            
+            # 显示在 Label 中
+            self.image_label.configure(image=photo)
+            self.image_label.image = photo  # 保持引用，防止被垃圾回收
+            
+        except Exception as e:
+            self.image_label.configure(text=f"无法加载图像: {e}")
+```
+
+## 线程和异步处理
+
+### 长时间操作必须在后台线程执行
+```python
+import threading
+from tkinter import ttk
+
+class ProcessManager:
+    """处理管理器：支持后台任务"""
+    
+    def start_processing(self, files: list):
+        """启动图像处理任务"""
+        # 禁用按钮
+        self.process_button.configure(state='disabled')
+        
+        # 启动后台线程
+        thread = threading.Thread(
+            target=self._process_in_background,
+            args=(files,),
+            daemon=True
+        )
+        thread.start()
+    
+    def _process_in_background(self, files: list):
+        """后台处理任务"""
+        try:
+            for i, file_path in enumerate(files):
+                # 执行处理
+                result = self.processor.process_image(file_path)
+                
+                # 更新进度（必须在主线程中更新 UI）
+                self.root.after(0, self._update_progress, i + 1, len(files))
+                
+        except Exception as e:
+            # 在主线程中显示错误
+            self.root.after(0, lambda: messagebox.showerror("错误", str(e)))
+        
+        finally:
+            # 在主线程中重新启用按钮
+            self.root.after(0, lambda: self.process_button.configure(state='normal'))
+    
+    def _update_progress(self, current: int, total: int):
+        """更新进度条（在主线程中调用）"""
+        percentage = (current / total) * 100
+        self.progress_bar['value'] = percentage
+        self.status_label.configure(text=f"处理中: {current}/{total}")
+```
+
+### 进度条
+```python
+from tkinter import ttk
+
+# 确定进度条
+progress = ttk.Progressbar(parent, orient='horizontal', length=300, mode='determinate')
+progress['maximum'] = 100
+progress['value'] = 50  # 设置进度
+
+# 不确定进度条（动画效果）
+progress = ttk.Progressbar(parent, orient='horizontal', length=300, mode='indeterminate')
+progress.start()  # 开始动画
+progress.stop()   # 停止动画
+```
+
+## 性能优化
+
+### 避免频繁重绘
+- 批量更新 UI，减少重绘次数
+- 使用 `update_idletasks()` 而不是 `update()`
+- 大量数据使用虚拟列表（仅显示可见项）
+
+### 图像缓存
+```python
+class ImageCache:
+    """图像缓存管理器"""
+    
+    def __init__(self, max_cache_size: int = 50):
+        self._cache = {}
+        self._max_size = max_cache_size
+    
+    def get_thumbnail(self, image_path: str, size: tuple) -> ImageTk.PhotoImage:
+        """获取缓存的缩略图"""
+        cache_key = f"{image_path}_{size[0]}x{size[1]}"
+        
+        if cache_key not in self._cache:
+            # 生成缩略图
+            image = Image.open(image_path)
+            image.thumbnail(size, Image.Resampling.LANCZOS)
+            photo = ImageTk.PhotoImage(image)
+            
+            # 缓存管理
+            if len(self._cache) >= self._max_size:
+                # 移除最旧的缓存
+                oldest_key = next(iter(self._cache))
+                del self._cache[oldest_key]
+            
+            self._cache[cache_key] = photo
+        
+        return self._cache[cache_key]
+```

@@ -1,0 +1,79 @@
+---
+alwaysApply: true
+---
+
+# ImageForge 项目结构指南
+
+## 项目概述
+
+ImageForge 是一个基于 Python 和 tkinter 的批量图像处理工具，支持本地和云端压缩、调整大小、格式转换等功能。
+
+## 入口点和核心文件
+
+- **主入口**: [main.py](mdc:main.py) - 应用程序启动入口，初始化配置和主窗口
+- **核心配置**: [core/config.py](mdc:core/config.py) - 配置管理，读取 config.ini
+- **图像处理器**: [core/image_processor.py](mdc:core/image_processor.py) - 图像处理核心逻辑
+- **文件管理**: [core/file_manager.py](mdc:core/file_manager.py) - 文件和目录操作
+- **主窗口**: [gui/main_window.py](mdc:gui/main_window.py) - GUI 主界面
+
+## 目录结构说明
+
+```
+ImageForge/
+├── core/              # 核心业务逻辑层
+│   ├── config.py      # 配置管理（config.ini 解析）
+│   ├── file_manager.py    # 文件操作（选择、保存、目录管理）
+│   └── image_processor.py # 图像处理编排器
+├── gui/               # 用户界面层
+│   ├── main_window.py     # 主窗口（tkinter.Tk）
+│   ├── asset_cleaner_panel.py # 资源清理面板
+│   └── managers/          # UI 组件管理器（模块化 UI 逻辑）
+│       ├── main_view.py          # 主视图管理
+│       ├── file_manager_view.py  # 文件选择视图
+│       ├── preview_manager.py    # 图像预览管理
+│       ├── process_control_manager.py # 处理控制面板
+│       └── status_bar_manager.py # 状态栏管理
+├── utils/             # 工具模块层
+│   ├── pillow_wrapper.py  # Pillow 图像处理封装
+│   ├── tinypng_client.py  # TinyPNG API 客户端
+│   └── asset_cleaner/     # 资源清理工具集
+│       ├── asset_cleaner.py      # 核心清理逻辑
+│       ├── asset_size_analyzer.py # 资源大小分析
+│       ├── file_helper.py         # 文件辅助工具
+│       └── utils.py              # 通用工具函数
+├── tools/             # 独立工具集
+│   └── asset-cleaner-cocos/ # Cocos Creator 资源清理工具（独立运行）
+├── main.py            # 应用程序入口
+├── config.ini         # 配置文件（API keys, 默认设置）
+└── requirements.txt   # Python 依赖
+```
+
+## 架构分层原则
+
+1. **核心层 (core/)**: 纯业务逻辑，不依赖 GUI
+2. **界面层 (gui/)**: GUI 组件，依赖 tkinter，调用核心层
+3. **工具层 (utils/)**: 可复用的工具模块，被核心层调用
+4. **独立工具 (tools/)**: 独立运行的工具程序
+
+## 模块依赖关系
+
+```
+main.py
+  ↓
+gui/main_window.py
+  ↓
+gui/managers/* (UI 管理器)
+  ↓
+core/image_processor.py (处理编排)
+  ↓
+utils/pillow_wrapper.py + utils/tinypng_client.py
+  ↓
+core/file_manager.py (文件操作)
+```
+
+## 关键设计模式
+
+- **分层架构**: Core-GUI-Utils 三层分离
+- **管理器模式**: GUI 功能模块化为独立管理器
+- **策略模式**: 多种图像处理策略（Pillow 本地 / TinyPNG 云端）
+- **配置驱动**: 通过 config.ini 控制应用行为

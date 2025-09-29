@@ -1,0 +1,421 @@
+---
+globs: core/**/*.py,utils/**/*.py
+description: 图像处理和工具模块开发规范
+---
+
+# 图像处理模块规范
+
+## 核心原则
+
+### 分层架构
+1. **核心编排层** (`core/image_processor.py`): 编排处理流程，不直接操作图像
+2. **工具执行层** (`utils/pillow_wrapper.py`, `utils/tinypng_client.py`): 具体图像处理实现
+3. **文件管理层** (`core/file_manager.py`): 文件和目录操作
+
+### 职责划分
+- **ImageProcessor**: 处理流程编排、错误处理、回调协调
+- **PillowWrapper**: 本地图像处理（压缩、调整大小、格式转换）
+- **TinyPNGClient**: 云端压缩服务（API 调用、重试逻辑）
+- **FileManager**: 文件操作（读取、写入、目录管理）
+
+## 图像处理接口规范
+
+### 处理器接口设计
+所有图像处理类必须实现统一的接口：
+```python
+from abc import ABC, abstractmethod
+from typing import Optional, Dict
+
+class ImageProcessorBase(ABC):
+    """图像处理器基类"""
+    
+    @abstractmethod
+    def compress(self, input_path: str, output_path: str, quality: int = 80) -> bool:
+        """
+        压缩图像
+        
+        Args:
+            input_path: 输入图像路径
+            output_path: 输出图像路径
+            quality: 压缩质量 (1-100)
+            
+        Returns:
+            bool: 是否成功
+        """
+        pass
+    
+    @abstractmethod
+    def resize(self, input_path: str, output_path: str, 
+               width: int, height: int, keep_aspect: bool = True) -> bool:
+        """
+        调整图像大小
+        
+        Args:
+            input_path: 输入图像路径
+            output_path: 输出图像路径
+            width: 目标宽度
+            height: 目标高度
+            keep_aspect: 是否保持宽高比
+            
+        Returns:
+            bool: 是否成功
+        """
+        pass
+    
+    @abstractmethod
+    def convert_format(self, input_path: str, output_path: str, 
+                       output_format: str) -> bool:
+        """
+        转换图像格式
+        
+        Args:
+            input_path: 输入图像路径
+            output_path: 输出图像路径
+            output_format: 输出格式 (jpeg, png, webp, etc.)
+            
+        Returns:
+            bool: 是否成功
+        """
+        pass
+```
+
+### 返回值规范
+- 成功操作返回 `True`
+- 失败操作返回 `False` 或抛出具体异常
+- 处理结果包含详细信息：
+  ```python
+  class ProcessResult:
+      """处理结果数据类"""
+      def __init__(self):
+          self.success: bool = False
+          self.input_path: str = ""
+          self.output_path: str = ""
+          self.input_size: int = 0  # 字节
+          self.output_size: int = 0  # 字节
+          self.compression_ratio: float = 0.0
+          self.processing_time: float = 0.0  # 秒
+          self.error_message: Optional[str] = None
+  ```
+
+## Pillow 图像处理
+
+### 基本操作规范
+```python
+from PIL import Image
+import os
+
+class PillowWrapper:
+    """Pillow 图像处理封装"""
+    
+    # 支持的图像格式
+    SUPPORTED_FORMATS = {
+        'jpeg': 'JPEG',
+        'jpg': 'JPEG',
+        'png': 'PNG',
+        'bmp': 'BMP',
+        'gif': 'GIF',
+        'tiff': 'TIFF',
+        'webp': 'WEBP'
+    }
+    
+    def compress(self, input_path: str, output_path: str, 
+                 quality: int = 80, optimize: bool = True) -> bool:
+        """
+        压缩图像
+        
+        Args:
+            input_path: 输入路径
+            output_path: 输出路径
+            quality: 压缩质量 (1-100)
+            optimize: 是否优化（PNG 会启用更好的压缩）
+            
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            with Image.open(input_path) as img:
+                # 转换 RGBA 为 RGB（如果输出为 JPEG）
+                if img.mode == 'RGBA' and output_path.lower().endswith(('.jpg', '.jpeg')):
+                    # 创建白色背景
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    background.paste(img, mask=img.split()[3])  # 使用 alpha 通道
+                    img = background
+                
+                # 保存压缩后的图像
+                save_kwargs = {'quality': quality, 'optimize': optimize}
+                
+                # PNG 特殊处理
+                if output_path.lower().endswith('.png'):
+                    save_kwargs = {'optimize': True, 'compress_level': 9}
+                
+                img.save(output_path, **save_kwargs)
+                return True
+                
+        except Exception as e:
+            logging.error(f"压缩图像失败: {input_path}, 错误: {e}")
+            return False
+```
+
+### 图像调整大小
+```python
+def resize(self, input_path: str, output_path: str,
+           width: int, height: int, keep_aspect: bool = True,
+           resample: Image.Resampling = Image.Resampling.LANCZOS) -> bool:
+    """
+    调整图像大小
+    
+    Args:
+        input_path: 输入路径
+        output_path: 输出路径
+        width: 目标宽度
+        height: 目标高度
+        keep_aspect: 是否保持宽高比
+        resample: 重采样算法（LANCZOS 质量最高但最慢）
+        
+    Returns:
+        bool: 是否成功
+    """
+    try:
+        with Image.open(input_path) as img:
+            if keep_aspect:
+                # 保持宽高比，使用 thumbnail
+                img.thumbnail((width, height), resample)
+            else:
+                # 直接调整到指定尺寸
+                img = img.resize((width, height), resample)
+            
+            img.save(output_path)
+            return True
+            
+    except Exception as e:
+        logging.error(f"调整图像大小失败: {input_path}, 错误: {e}")
+        return False
+```
+
+### 格式转换
+```python
+def convert_format(self, input_path: str, output_path: str,
+                   output_format: str, **save_options) -> bool:
+    """
+    转换图像格式
+    
+    Args:
+        input_path: 输入路径
+        output_path: 输出路径
+        output_format: 输出格式 (jpeg, png, webp, etc.)
+        **save_options: 额外的保存选项
+        
+    Returns:
+        bool: 是否成功
+    """
+    try:
+        format_upper = self.SUPPORTED_FORMATS.get(output_format.lower())
+        if not format_upper:
+            raise ValueError(f"不支持的输出格式: {output_format}")
+        
+        with Image.open(input_path) as img:
+            # JPEG 不支持透明度
+            if format_upper == 'JPEG' and img.mode in ('RGBA', 'LA', 'P'):
+                img = img.convert('RGB')
+            
+            img.save(output_path, format=format_upper, **save_options)
+            return True
+            
+    except Exception as e:
+        logging.error(f"转换图像格式失败: {input_path} -> {output_format}, 错误: {e}")
+        return False
+```
+
+## TinyPNG API 集成
+
+### API 客户端实现
+参考 [utils/tinypng_client.py](mdc:utils/tinypng_client.py):
+```python
+import requests
+from typing import Optional
+
+class TinyPNGClient:
+    """TinyPNG API 客户端"""
+    
+    API_URL = "https://api.tinify.com/shrink"
+    
+    def __init__(self, api_key: str, timeout: int = 30):
+        """
+        初始化客户端
+        
+        Args:
+            api_key: TinyPNG API 密钥
+            timeout: 请求超时时间（秒）
+        """
+        self.api_key = api_key
+        self.timeout = timeout
+        self.session = requests.Session()
+        self.session.auth = ('api', api_key)
+    
+    def compress(self, input_path: str, output_path: str,
+                 max_retries: int = 3) -> bool:
+        """
+        使用 TinyPNG 压缩图像
+        
+        Args:
+            input_path: 输入图像路径
+            output_path: 输出图像路径
+            max_retries: 最大重试次数
+            
+        Returns:
+            bool: 是否成功
+        """
+        for attempt in range(max_retries):
+            try:
+                # 上传图像
+                with open(input_path, 'rb') as f:
+                    response = self.session.post(
+                        self.API_URL,
+                        data=f.read(),
+                        timeout=self.timeout
+                    )
+                
+                if response.status_code == 201:
+                    # 下载压缩后的图像
+                    output_url = response.json()['output']['url']
+                    compressed_data = self.session.get(output_url, timeout=self.timeout)
+                    
+                    with open(output_path, 'wb') as f:
+                        f.write(compressed_data.content)
+                    
+                    return True
+                else:
+                    logging.warning(f"TinyPNG API 返回错误: {response.status_code}, {response.text}")
+                    
+            except requests.Timeout:
+                logging.warning(f"TinyPNG 请求超时，重试 {attempt + 1}/{max_retries}")
+            except Exception as e:
+                logging.error(f"TinyPNG 压缩失败: {e}")
+                break
+        
+        return False
+```
+
+### API 调用注意事项
+- 每月有免费配额限制（500 张图像）
+- 必须实现重试机制（网络问题）
+- 必须处理 API 错误（401 未授权、429 配额超限等）
+- 记录 API 使用次数
+- 实现降级策略（API 失败时使用本地压缩）
+
+## 批量处理
+
+### 批量处理编排
+```python
+from typing import List, Callable, Optional
+import logging
+
+class BatchProcessor:
+    """批量图像处理器"""
+    
+    def __init__(self, processor: ImageProcessorBase,
+                 progress_callback: Optional[Callable] = None):
+        """
+        初始化批量处理器
+        
+        Args:
+            processor: 图像处理器实例
+            progress_callback: 进度回调函数 (current, total, file_path)
+        """
+        self.processor = processor
+        self.progress_callback = progress_callback
+    
+    def process_batch(self, file_paths: List[str], 
+                      output_dir: str, 
+                      operation: str,
+                      **options) -> Dict[str, ProcessResult]:
+        """
+        批量处理图像
+        
+        Args:
+            file_paths: 输入文件路径列表
+            output_dir: 输出目录
+            operation: 操作类型 ('compress', 'resize', 'convert')
+            **options: 操作选项
+            
+        Returns:
+            Dict[str, ProcessResult]: 文件路径到处理结果的映射
+        """
+        results = {}
+        total = len(file_paths)
+        
+        for i, file_path in enumerate(file_paths):
+            try:
+                # 生成输出路径
+                output_path = self._generate_output_path(file_path, output_dir, options)
+                
+                # 执行处理
+                if operation == 'compress':
+                    success = self.processor.compress(file_path, output_path, **options)
+                elif operation == 'resize':
+                    success = self.processor.resize(file_path, output_path, **options)
+                elif operation == 'convert':
+                    success = self.processor.convert_format(file_path, output_path, **options)
+                else:
+                    raise ValueError(f"未知的操作类型: {operation}")
+                
+                # 记录结果
+                results[file_path] = self._create_result(
+                    file_path, output_path, success
+                )
+                
+                # 更新进度
+                if self.progress_callback:
+                    self.progress_callback(i + 1, total, file_path)
+                    
+            except Exception as e:
+                logging.error(f"处理文件失败: {file_path}, 错误: {e}")
+                results[file_path] = self._create_error_result(file_path, str(e))
+        
+        return results
+```
+
+### 进度回调
+```python
+def progress_callback(current: int, total: int, file_path: str):
+    """
+    进度回调函数示例
+    
+    Args:
+        current: 当前处理的文件序号
+        total: 总文件数
+        file_path: 当前处理的文件路径
+    """
+    percentage = (current / total) * 100
+    print(f"处理进度: {percentage:.1f}% ({current}/{total}) - {file_path}")
+```
+
+## 错误处理和日志
+
+### 错误分类
+1. **文件错误**: FileNotFoundError, PermissionError, IOError
+2. **格式错误**: ValueError (不支持的格式), PIL.UnidentifiedImageError
+3. **网络错误**: requests.Timeout, requests.ConnectionError
+4. **API 错误**: 401 未授权, 429 配额超限
+
+### 日志记录
+```python
+import logging
+
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('imageforge.log'),
+        logging.StreamHandler()
+    ]
+)
+
+# 使用日志
+logging.debug("调试信息：开始处理图像")
+logging.info("成功压缩图像: %s, 压缩率: %.2f%%", file_path, ratio)
+logging.warning("图像质量低于阈值: %s", file_path)
+logging.error("处理图像失败: %s, 错误: %s", file_path, error)
+logging.critical("系统资源耗尽，无法继续处理")
+```
