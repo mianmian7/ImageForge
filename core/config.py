@@ -45,6 +45,33 @@ class Config:
             print(f"获取配置失败: {e}")
             return default
     
+    def get_int(self, key, section='Settings', default=0):
+        """获取整数配置值"""
+        try:
+            value = self.config.get(section, key, fallback=str(default))
+            return int(value)
+        except (ValueError, TypeError) as e:
+            print(f"获取整数配置失败: {e}")
+            return default
+    
+    def get_bool(self, key, section='Settings', default=False):
+        """获取布尔配置值"""
+        try:
+            value = self.config.get(section, key, fallback=str(default))
+            return value.lower() in ('true', '1', 'yes', 'on')
+        except Exception as e:
+            print(f"获取布尔配置失败: {e}")
+            return default
+    
+    def get_float(self, key, section='Settings', default=0.0):
+        """获取浮点数配置值"""
+        try:
+            value = self.config.get(section, key, fallback=str(default))
+            return float(value)
+        except (ValueError, TypeError) as e:
+            print(f"获取浮点数配置失败: {e}")
+            return default
+    
     def set(self, key, value, section='Settings'):
         """设置配置值"""
         try:

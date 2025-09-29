@@ -15,12 +15,27 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from gui.main_window import ImageProcessorGUI
 from core.config import Config
+from core.config_validator import validate_config
+from utils.logger import setup_logging, get_logger
+
+# 初始化日志系统
+setup_logging(log_level='INFO', log_file='imageforge.log')
+logger = get_logger(__name__)
 
 def main():
     """主程序入口函数"""
     try:
         # 初始化配置
         config = Config()
+        
+        # 验证配置
+        is_valid, validation_summary = validate_config(config)
+        if not is_valid:
+            logger.error(f"配置验证失败:\n{validation_summary}")
+            messagebox.showerror("配置错误", validation_summary)
+            sys.exit(1)
+        elif validation_summary:
+            logger.info(f"配置验证结果:\n{validation_summary}")
         
         # 创建主窗口
         root = tk.Tk()
@@ -33,9 +48,9 @@ def main():
             try:
                 # 设置窗口图标（支持.ico格式）
                 root.iconbitmap(icon_path)
-                print(f"Window icon set from: {icon_path}")
+                logger.info(f"Window icon set from: {icon_path}")
             except Exception as icon_error:
-                print(f"Warning: Could not set window icon: {icon_error}")
+                logger.warning(f"Warning: Could not set window icon: {icon_error}")
         
         # 创建应用实例
         app = ImageProcessorGUI(root, config)
@@ -44,6 +59,7 @@ def main():
         root.mainloop()
         
     except Exception as e:
+        logger.critical(f"程序启动失败: {str(e)}", exc_info=True)
         messagebox.showerror("启动错误", f"程序启动失败: {str(e)}")
         sys.exit(1)
 

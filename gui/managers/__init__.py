@@ -1,17 +1,16 @@
 """
-GUI components package
+GUI管理器模块
+提供模块化的GUI组件管理
 """
 
-from .preview_manager import PreviewManager
-from .process_control_manager import ProcessControlManager
-from .file_manager_view import FileManagerView
-from .status_bar_manager import StatusBarManager
-from .main_view import MainView
+from gui.managers.file_manager_view import FileManagerView
+from gui.managers.preview_manager import PreviewManager
+from gui.managers.process_control_manager import ProcessControlManager
+from gui.managers.status_bar_manager import StatusBarManager
 
 __all__ = [
-    'PreviewManager',
-    'ProcessControlManager', 
     'FileManagerView',
-    'StatusBarManager',
-    'MainView'
+    'PreviewManager',
+    'ProcessControlManager',
+    'StatusBarManager'
 ]

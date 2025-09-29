@@ -1,149 +1,177 @@
 """
-Process Control Manager for ImageForge GUI
-Handles processing parameters and control operations
+处理控制管理器模块
+管理图像处理控制和参数设置
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox
-from typing import Dict, Any, Optional, List
+from tkinter import ttk, filedialog, messagebox
+import threading
+import os
+from typing import Optional, Callable, Dict, Any, List
+from utils.logger import get_logger
 
-from architecture.interfaces import IUIComponent
-from architecture.events import EventBus, EventTypes, subscribe_to
-from architecture.di import inject
-from processing.models import ProcessType, OutputMode
-from core.config import Config
-from processing.commands import ThreadedCommandExecutor, ProcessingCommandFactory
-from processing.factory import ImageProcessorFactory
+logger = get_logger(__name__)
 
 
-class ProcessControlManager(IUIComponent):
-    """Manages processing controls and parameters"""
+class ProcessControlManager:
+    """处理控制管理器类"""
     
-    def __init__(self, config: Config = None):
-        self.config = config or Config()
-        self._event_bus: Optional[EventBus] = None
-        self._parent = None
+    def __init__(self, parent: tk.Widget, config, processor, file_manager):
+        """初始化处理控制管理器"""
+        self.parent = parent
+        self.config = config
+        self.processor = processor
+        self.file_manager = file_manager
         
-        # UI components
+        # 回调函数
+        self.on_process_complete_callback = None
+        self.on_process_error_callback = None
+        self.on_batch_progress_callback = None
+        self.on_batch_complete_callback = None
+        
+        # UI 组件
+        self.control_frame = None
         self.process_type_var = None
-        self.params_frame = None
-        self.param_input_frame = None
-        self.output_mode_var = None
-        self.process_btn = None
-        self.stop_btn = None
-        self.batch_process_btn = None
-        self.select_output_btn = None
-        
-        # Parameter variables
         self.resize_mode_var = None
         self.percentage_var = None
         self.width_var = None
         self.height_var = None
         self.maintain_aspect_var = None
+        self.output_mode_var = None
+        self.output_format_var = None
+        self.meta_override_var = None
         self.tinypng_api_key_var = None
-        self.api_key_status_label = None
+        self.pillow_quality_var = None
+        self.pillow_mode_var = None
+        self.pillow_scale_var = None
+        
+        # UI子组件
+        self.params_frame = None
+        self.param_input_frame = None
         self.aspect_hint_label = None
+        self.api_key_status_label = None
+        self.pillow_quality_hint_label = None
+        self.pillow_resize_frame = None
+        self.select_output_btn = None
+        self.process_btn = None
+        self.stop_btn = None
+        self.batch_process_btn = None
         
-        # State
+        # 状态
+        self.is_processing = False
+        self.processing_thread = None
         self.output_directory = None
-        # Command executor
-        self.command_executor = ThreadedCommandExecutor()
-        self.processor_factory = ImageProcessorFactory(config)
         
-    @inject('event_manager')
-    def set_event_bus(self, event_bus: EventBus):
-        """Set event bus for communication"""
-        self._event_bus = event_bus
-        
-        # Subscribe to events
-        event_bus.subscribe(EventTypes.FILE_SELECTED, self._on_file_selected)
-        event_bus.subscribe(EventTypes.FILES_LOADED, self._on_files_loaded)
-        event_bus.subscribe(EventTypes.PROCESSING_STARTED, self._on_processing_started)
-        event_bus.subscribe(EventTypes.PROCESSING_COMPLETE, self._on_processing_complete)
-        event_bus.subscribe(EventTypes.PROCESSING_ERROR, self._on_processing_error)
-        event_bus.subscribe(EventTypes.PROCESSING_STOPPED, self._on_processing_stopped)
+        self._create_widgets()
+        self._setup_layout()
     
-    def initialize(self, parent):
-        """Initialize process control components"""
-        self._parent = parent
-        self._create_process_control_ui()
-    
-    def _create_process_control_ui(self):
-        """Create process control user interface"""
-        # Create control frame
-        control_frame = ttk.LabelFrame(self._parent, text="处理控制", padding="10")
-        control_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+    def _create_widgets(self):
+        """创建处理控制组件"""
+        self.control_frame = ttk.LabelFrame(self.parent, text="处理控制", padding="10")
         
-        # Process type selection
-        process_frame = ttk.Frame(control_frame)
+        # 处理方式选择
+        self._create_process_type_selection()
+        
+        # 参数设置区域
+        self.params_frame = ttk.Frame(self.control_frame)
+        self.params_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # 初始化为调整分辨率参数
+        self.create_resize_params()
+        
+        # 输出选项
+        self._create_output_options()
+        
+        # 处理按钮
+        self._create_processing_buttons()
+    
+    def _create_process_type_selection(self):
+        """创建处理方式选择"""
+        process_frame = ttk.Frame(self.control_frame)
         process_frame.pack(fill=tk.X, pady=(0, 10))
         
         ttk.Label(process_frame, text="处理方式:").pack(side=tk.LEFT, padx=(0, 10))
         
-        self.process_type_var = tk.StringVar(value=ProcessType.RESIZE.value)
+        self.process_type_var = tk.StringVar(value="resize")
         resize_radio = ttk.Radiobutton(process_frame, text="调整分辨率", 
-                                      variable=self.process_type_var, value=ProcessType.RESIZE.value,
-                                      command=self._on_process_type_change)
+                                      variable=self.process_type_var, value="resize",
+                                      command=self.on_process_type_change)
         resize_radio.pack(side=tk.LEFT, padx=(0, 10))
         
         compress_radio = ttk.Radiobutton(process_frame, text="TinyPNG压缩", 
-                                        variable=self.process_type_var, value=ProcessType.COMPRESS.value,
-                                        command=self._on_process_type_change)
-        compress_radio.pack(side=tk.LEFT)
+                                        variable=self.process_type_var, value="compress",
+                                        command=self.on_process_type_change)
+        compress_radio.pack(side=tk.LEFT, padx=(0, 10))
         
-        # Parameters frame
-        self.params_frame = ttk.Frame(control_frame)
-        self.params_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        # Create resize parameters by default
-        self._create_resize_params()
-        
-        # Output options
-        output_frame = ttk.Frame(control_frame)
+        pillow_compress_radio = ttk.Radiobutton(process_frame, text="Pillow压缩", 
+                                              variable=self.process_type_var, value="pillow_compress",
+                                              command=self.on_process_type_change)
+        pillow_compress_radio.pack(side=tk.LEFT)
+    
+    def _create_output_options(self):
+        """创建输出选项"""
+        output_frame = ttk.Frame(self.control_frame)
         output_frame.pack(fill=tk.X, pady=(0, 10))
         
         ttk.Label(output_frame, text="输出方式:").pack(side=tk.LEFT, padx=(0, 10))
         
-        self.output_mode_var = tk.StringVar(value=OutputMode.NEW_FOLDER.value)
+        self.output_mode_var = tk.StringVar(value="new_folder")
         overwrite_radio = ttk.Radiobutton(output_frame, text="覆盖原图", 
-                                         variable=self.output_mode_var, value=OutputMode.OVERWRITE.value)
+                                         variable=self.output_mode_var, value="overwrite")
         overwrite_radio.pack(side=tk.LEFT, padx=(0, 10))
         
         new_folder_radio = ttk.Radiobutton(output_frame, text="新建文件夹", 
-                                          variable=self.output_mode_var, value=OutputMode.NEW_FOLDER.value)
+                                          variable=self.output_mode_var, value="new_folder")
         new_folder_radio.pack(side=tk.LEFT, padx=(0, 10))
         
         custom_dir_radio = ttk.Radiobutton(output_frame, text="指定目录", 
-                                          variable=self.output_mode_var, value=OutputMode.CUSTOM_DIR.value)
+                                          variable=self.output_mode_var, value="custom_dir")
         custom_dir_radio.pack(side=tk.LEFT, padx=(0, 10))
         
         self.select_output_btn = ttk.Button(output_frame, text="选择目录", 
-                                          command=self._select_output_directory, 
-                                          state=tk.DISABLED)
+                                          command=self._select_output_directory, state=tk.DISABLED)
         self.select_output_btn.pack(side=tk.LEFT)
         
-        # Bind output mode change
         self.output_mode_var.trace('w', self._on_output_mode_change)
-        
-        # Control buttons
-        button_frame = ttk.Frame(control_frame)
+    
+    def _create_processing_buttons(self):
+        """创建处理按钮"""
+        button_frame = ttk.Frame(self.control_frame)
         button_frame.pack(fill=tk.X)
         
         self.process_btn = ttk.Button(button_frame, text="处理图片", 
-                                     command=self._on_process_clicked, state=tk.DISABLED)
+                                     command=self.process_image, state=tk.DISABLED)
         self.process_btn.pack(side=tk.LEFT, padx=(0, 10))
         
         self.stop_btn = ttk.Button(button_frame, text="停止处理", 
-                                  command=self._on_stop_clicked, state=tk.DISABLED)
-        self.stop_btn.pack(side=tk.LEFT)
+                                  command=self.stop_processing, state=tk.DISABLED)
+        self.stop_btn.pack(side=tk.LEFT, padx=(0, 10))
         
         self.batch_process_btn = ttk.Button(button_frame, text="批量处理", 
-                                           command=self._on_batch_process_clicked, state=tk.DISABLED)
-        self.batch_process_btn.pack(side=tk.LEFT)
+                                           command=self.batch_process_images, state=tk.DISABLED)
+        self.batch_process_btn.pack(side=tk.LEFT, padx=(10, 0))
+        
+        # 输出格式选择
+        ttk.Label(button_frame, text="输出格式:").pack(side=tk.LEFT, padx=(10, 5))
+        
+        self.output_format_var = tk.StringVar(value="保持原格式")
+        format_combo = ttk.Combobox(button_frame, textvariable=self.output_format_var, 
+                                   values=["保持原格式", "JPEG", "PNG", "WEBP", "BMP", "TIFF"], 
+                                   width=12, state="readonly")
+        format_combo.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Meta覆盖选项
+        self.meta_override_var = tk.BooleanVar(value=False)
+        meta_override_checkbox = ttk.Checkbutton(button_frame, text="Meta覆盖", 
+                                               variable=self.meta_override_var)
+        meta_override_checkbox.pack(side=tk.LEFT, padx=(10, 0))
     
-    def _create_resize_params(self):
-        """Create resize parameter controls"""
-        # Clear existing controls
+    def _setup_layout(self):
+        """设置组件布局"""
+        pass
+    
+    def create_resize_params(self):
+        """创建分辨率调整参数控件"""
         for widget in self.params_frame.winfo_children():
             widget.destroy()
         
@@ -160,15 +188,13 @@ class ProcessControlManager(IUIComponent):
                                           command=self._on_resize_mode_change)
         dimensions_radio.pack(side=tk.LEFT)
         
-        # Parameter input frame
         self.param_input_frame = ttk.Frame(self.params_frame)
         self.param_input_frame.pack(side=tk.LEFT, padx=(20, 0))
         
-        # Create percentage input by default
-        self._create_percentage_input()
+        self._on_resize_mode_change()
     
     def _create_percentage_input(self):
-        """Create percentage input controls"""
+        """创建百分比输入控件"""
         for widget in self.param_input_frame.winfo_children():
             widget.destroy()
         
@@ -182,11 +208,10 @@ class ProcessControlManager(IUIComponent):
         ttk.Label(self.param_input_frame, text="%").pack(side=tk.LEFT)
     
     def _create_dimensions_input(self):
-        """Create dimensions input controls"""
+        """创建尺寸输入控件"""
         for widget in self.param_input_frame.winfo_children():
             widget.destroy()
         
-        # Width and height input
         size_frame = ttk.Frame(self.param_input_frame)
         size_frame.pack(side=tk.TOP, pady=(0, 10))
         
@@ -204,7 +229,6 @@ class ProcessControlManager(IUIComponent):
                                     textvariable=self.height_var, width=10)
         height_spinbox.pack(side=tk.LEFT, padx=(5, 0))
         
-        # Aspect ratio option
         aspect_frame = ttk.Frame(self.param_input_frame)
         aspect_frame.pack(side=tk.TOP)
         
@@ -214,24 +238,20 @@ class ProcessControlManager(IUIComponent):
                                       command=self._on_aspect_ratio_change)
         aspect_check.pack(side=tk.LEFT, padx=(0, 10))
         
-        # Hint label
         self.aspect_hint_label = ttk.Label(aspect_frame, text="(保持比例，图片可能不完全匹配指定尺寸)", 
                                          foreground="gray", font=("Arial", 9))
         self.aspect_hint_label.pack(side=tk.LEFT)
     
-    def _create_tinypng_params(self):
-        """Create TinyPNG parameter controls"""
-        # Clear existing controls
+    def create_tinypng_params(self):
+        """创建TinyPNG压缩参数控件"""
         for widget in self.params_frame.winfo_children():
             widget.destroy()
         
-        # API key input
         api_key_frame = ttk.Frame(self.params_frame)
         api_key_frame.pack(side=tk.LEFT, padx=(0, 10))
         
         ttk.Label(api_key_frame, text="API KEY:").pack(side=tk.LEFT, padx=(0, 5))
         
-        # Get current API key
         current_api_key = self.config.get_tinypng_api_key()
         default_api_key = "4PGdmZhdCHG9NJ53VMl2kTZfcFCFTTNH"
         api_key_value = current_api_key if current_api_key and current_api_key != 'your_tinypng_api_key_here' else default_api_key
@@ -240,39 +260,136 @@ class ProcessControlManager(IUIComponent):
         api_key_entry = ttk.Entry(api_key_frame, textvariable=self.tinypng_api_key_var, width=40)
         api_key_entry.pack(side=tk.LEFT, padx=(5, 10))
         
-        # Save API key button
         save_api_key_btn = ttk.Button(api_key_frame, text="保存", command=self._save_tinypng_api_key)
         save_api_key_btn.pack(side=tk.LEFT)
         
-        # API key status label
         self.api_key_status_label = ttk.Label(api_key_frame, text="", foreground="gray", font=("Arial", 9))
         self.api_key_status_label.pack(side=tk.LEFT, padx=(10, 0))
         
-        # Update API key status
         self._update_api_key_status()
     
-    def _update_api_key_status(self):
-        """Update API key status display"""
-        if not hasattr(self, 'tinypng_api_key_var'):
-            return
+    def create_pillow_compress_params(self):
+        """创建Pillow压缩参数控件"""
+        for widget in self.params_frame.winfo_children():
+            widget.destroy()
         
-        api_key = self.tinypng_api_key_var.get().strip()
-        if api_key:
-            if api_key == "4PGdmZhdCHG9NJ53VMl2kTZfcFCFTTNH":
-                status_text = "(使用默认API密钥)"
-                color = "green"
-            else:
-                status_text = "(自定义API密钥)"
-                color = "blue"
+        quality_frame = ttk.Frame(self.params_frame)
+        quality_frame.pack(side=tk.LEFT, padx=(0, 20))
+        
+        ttk.Label(quality_frame, text="压缩质量:").pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.pillow_quality_var = tk.StringVar(value="85")
+        quality_spinbox = ttk.Spinbox(quality_frame, from_=1, to=100, 
+                                    textvariable=self.pillow_quality_var, width=10)
+        quality_spinbox.pack(side=tk.LEFT, padx=(5, 5))
+        
+        self.pillow_quality_hint_label = ttk.Label(quality_frame, text="(1-100, 数值越小压缩率越高)", 
+                                                  foreground="gray", font=("Arial", 9))
+        self.pillow_quality_hint_label.pack(side=tk.LEFT)
+        
+        self.pillow_quality_var.trace('w', self._on_pillow_quality_change)
+        
+        mode_frame = ttk.Frame(self.params_frame)
+        mode_frame.pack(side=tk.LEFT, padx=(0, 10))
+        
+        ttk.Label(mode_frame, text="压缩模式:").pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.pillow_mode_var = tk.StringVar(value="optimize")
+        optimize_radio = ttk.Radiobutton(mode_frame, text="优化质量", 
+                                       variable=self.pillow_mode_var, value="optimize")
+        optimize_radio.pack(side=tk.LEFT, padx=(0, 5))
+        
+        resize_radio = ttk.Radiobutton(mode_frame, text="缩放压缩", 
+                                     variable=self.pillow_mode_var, value="resize_optimize")
+        resize_radio.pack(side=tk.LEFT)
+        
+        self.pillow_resize_frame = ttk.Frame(self.params_frame)
+        self.pillow_resize_frame.pack(side=tk.LEFT, padx=(20, 0))
+        
+        ttk.Label(self.pillow_resize_frame, text="缩放比例:").pack(side=tk.LEFT)
+        
+        self.pillow_scale_var = tk.StringVar(value="80")
+        scale_spinbox = ttk.Spinbox(self.pillow_resize_frame, from_=10, to=100, 
+                                  textvariable=self.pillow_scale_var, width=10)
+        scale_spinbox.pack(side=tk.LEFT, padx=(5, 5))
+        
+        ttk.Label(self.pillow_resize_frame, text="%").pack(side=tk.LEFT)
+        
+        self.pillow_mode_var.trace('w', self._on_pillow_mode_change)
+        
+        self._on_pillow_mode_change()
+        self._on_pillow_quality_change()
+    
+    def on_process_type_change(self):
+        """处理方式变化时的处理"""
+        process_type = self.process_type_var.get()
+        if process_type == "resize":
+            self.create_resize_params()
+        elif process_type == "compress":
+            self.create_tinypng_params()
+        elif process_type == "pillow_compress":
+            self.create_pillow_compress_params()
+    
+    def _on_resize_mode_change(self):
+        """调整方式变化时的处理"""
+        resize_mode = self.resize_mode_var.get()
+        if resize_mode == "percentage":
+            self._create_percentage_input()
         else:
-            status_text = "(未设置API密钥)"
-            color = "red"
-        
-        if hasattr(self, 'api_key_status_label'):
-            self.api_key_status_label.config(text=status_text, foreground=color)
+            self._create_dimensions_input()
+    
+    def _on_aspect_ratio_change(self):
+        """处理宽高比选项变更"""
+        if self.maintain_aspect_var.get():
+            self.aspect_hint_label.config(text="(保持比例，图片可能不完全匹配指定尺寸)")
+        else:
+            self.aspect_hint_label.config(text="(强制调整，图片将完全匹配指定尺寸，可能变形)")
+    
+    def _on_output_mode_change(self, *args):
+        """输出方式变化时的处理"""
+        output_mode = self.output_mode_var.get()
+        if output_mode == "custom_dir":
+            self.select_output_btn.config(state=tk.NORMAL)
+        else:
+            self.select_output_btn.config(state=tk.DISABLED)
+    
+    def _select_output_directory(self):
+        """选择输出目录"""
+        directory_path = filedialog.askdirectory(title="选择输出目录")
+        if directory_path:
+            self.output_directory = directory_path
+            logger.info(f"输出目录已设置: {directory_path}")
+    
+    def _on_pillow_mode_change(self, *args):
+        """处理Pillow压缩模式变化"""
+        if hasattr(self, 'pillow_mode_var') and hasattr(self, 'pillow_resize_frame'):
+            if self.pillow_mode_var.get() == "resize_optimize":
+                self.pillow_resize_frame.pack(side=tk.LEFT, padx=(20, 0))
+            else:
+                self.pillow_resize_frame.pack_forget()
+    
+    def _on_pillow_quality_change(self, *args):
+        """处理Pillow压缩质量变化"""
+        if hasattr(self, 'pillow_quality_var') and hasattr(self, 'pillow_quality_hint_label'):
+            try:
+                quality = int(self.pillow_quality_var.get())
+                if quality <= 10:
+                    hint_text, color = "(极限压缩: 极小文件，严重失真)", "red"
+                elif quality <= 30:
+                    hint_text, color = "(高压缩: 小文件，明显失真)", "orange"
+                elif quality <= 50:
+                    hint_text, color = "(中等压缩: 较小文件，轻微失真)", "blue"
+                elif quality <= 75:
+                    hint_text, color = "(轻度压缩: 轻微减小，质量良好)", "green"
+                else:
+                    hint_text, color = "(高质量: 文件较大，质量优秀)", "darkgreen"
+                
+                self.pillow_quality_hint_label.config(text=f"({quality}/100 {hint_text[1:]})", foreground=color)
+            except ValueError:
+                self.pillow_quality_hint_label.config(text="(1-100, 数值越小压缩率越高)", foreground="gray")
     
     def _save_tinypng_api_key(self):
-        """Save TinyPNG API key"""
+        """保存TinyPNG API密钥"""
         if not hasattr(self, 'tinypng_api_key_var'):
             return
         
@@ -283,98 +400,39 @@ class ProcessControlManager(IUIComponent):
             return
         
         try:
-            # Save to config
             self.config.set_tinypng_api_key(api_key)
             self.config.save_config()
+            self.processor.set_tinypng_api_key(api_key)
             
-            # Notify about API key change
-            if self._event_bus:
-                self._event_bus.publish(EventTypes.CONFIG_CHANGED, {
-                    'tinypng_api_key': api_key
-                })
-            
-            messagebox.showinfo("保存成功", "API密钥已保存")
-            self._update_api_key_status()
+            if self.processor.validate_tinypng_api_key(api_key):
+                messagebox.showinfo("保存成功", "API密钥保存成功且验证通过")
+                self.api_key_status_label.config(text="(API密钥有效)", foreground="green")
+            else:
+                messagebox.showwarning("保存成功", "API密钥已保存，但验证失败，请检查网络连接或密钥正确性")
+                self.api_key_status_label.config(text="(API密钥验证失败)", foreground="orange")
                 
         except Exception as e:
             messagebox.showerror("保存失败", f"保存API密钥失败: {str(e)}")
     
-    def _on_aspect_ratio_change(self):
-        """Handle aspect ratio option change"""
-        if self.maintain_aspect_var.get():
-            self.aspect_hint_label.config(text="(保持比例，图片可能不完全匹配指定尺寸)")
+    def _update_api_key_status(self):
+        """更新API密钥状态"""
+        api_key = self.tinypng_api_key_var.get() if hasattr(self, 'tinypng_api_key_var') else ''
+        if api_key:
+            if api_key == "4PGdmZhdCHG9NJ53VMl2kTZfcFCFTTNH":
+                status_text, color = "(使用默认API密钥)", "green"
+            else:
+                status_text, color = "(自定义API密钥)", "blue"
         else:
-            self.aspect_hint_label.config(text="(强制调整，图片将完全匹配指定尺寸，可能变形)")
-    
-    def update(self, data: Any):
-        """Update process control with new data"""
-        if isinstance(data, dict):
-            if 'enabled' in data:
-                self.set_enabled(data['enabled'])
-            if 'processing' in data:
-                self._set_processing_state(data['processing'])
-    
-    def get_state(self) -> Dict[str, Any]:
-        """Get current process control state"""
-        params = self._get_process_params()
-        return {
-            'process_type': self.process_type_var.get() if self.process_type_var else None,
-            'output_mode': self.output_mode_var.get() if self.output_mode_var else None,
-            'params': params,
-            'output_directory': self.output_directory,
-            'is_processing': self.is_processing,
-            'can_process': self.process_btn['state'] == tk.NORMAL
-        }
-    
-    def set_enabled(self, enabled: bool):
-        """Enable/disable process control components"""
-        state = tk.NORMAL if enabled else tk.DISABLED
+            status_text, color = "(未设置API密钥)", "red"
         
-        if self.process_type_var:
-            # Enable/disable radio buttons
-            for widget in self.params_frame.winfo_children():
-                if isinstance(widget, ttk.Radiobutton) or isinstance(widget, ttk.Button):
-                    widget.config(state=state)
-        
-        if self.output_mode_var:
-            # Enable/disable output mode controls
-            for widget in self.params_frame.master.winfo_children():
-                if isinstance(widget, ttk.Radiobutton) or isinstance(widget, ttk.Button):
-                    widget.config(state=state)
-        
-        # Update process button based on current state
-        if not self.is_processing:
-            self.process_btn.config(state=state)
-            self.batch_process_btn.config(state=state)
+        if hasattr(self, 'api_key_status_label'):
+            self.api_key_status_label.config(text=status_text, foreground=color)
     
-    def _set_processing_state(self, processing: bool):
-        """Set processing state"""
-        self.is_processing = processing
-        
-        if processing:
-            self.process_btn.config(state=tk.DISABLED)
-            self.stop_btn.config(state=tk.NORMAL)
-            self.batch_process_btn.config(state=tk.DISABLED)
-        else:
-            self.process_btn.config(state=tk.NORMAL)
-            self.stop_btn.config(state=tk.DISABLED)
-            self.batch_process_btn.config(state=tk.NORMAL)
-    
-    @property
-    def is_processing(self) -> bool:
-        """Check if currently processing"""
-        return hasattr(self, '_is_processing') and self._is_processing
-    
-    @is_processing.setter
-    def is_processing(self, value: bool):
-        """Set processing state"""
-        self._is_processing = value
-    
-    def _get_process_params(self) -> Optional[Dict[str, Any]]:
-        """Get current processing parameters"""
+    def get_process_params(self) -> Optional[Dict[str, Any]]:
+        """获取处理参数"""
         process_type = self.process_type_var.get()
         
-        if process_type == ProcessType.RESIZE.value:
+        if process_type == "resize":
             resize_mode = self.resize_mode_var.get()
             if resize_mode == "percentage":
                 resize_value = int(self.percentage_var.get())
@@ -392,252 +450,107 @@ class ProcessControlManager(IUIComponent):
             if resize_mode == "dimensions":
                 params['maintain_aspect'] = self.maintain_aspect_var.get()
             
-            return params
-        elif process_type == ProcessType.COMPRESS.value:
-            # Validate API key
+        elif process_type == "compress":
             if hasattr(self, 'tinypng_api_key_var'):
                 api_key = self.tinypng_api_key_var.get().strip()
-                if not api_key:
+                if api_key:
+                    self.processor.set_tinypng_api_key(api_key)
+                    params = {}
+                else:
                     messagebox.showerror("API密钥错误", "请先输入TinyPNG API密钥")
                     return None
             else:
                 messagebox.showerror("API密钥错误", "请先输入TinyPNG API密钥")
                 return None
-            
-            return {}
+        elif process_type == "pillow_compress":
+            if hasattr(self, 'pillow_quality_var') and hasattr(self, 'pillow_mode_var'):
+                params = {
+                    'quality': int(self.pillow_quality_var.get()),
+                    'mode': self.pillow_mode_var.get()
+                }
+                
+                if self.pillow_mode_var.get() == "resize_optimize" and hasattr(self, 'pillow_scale_var'):
+                    params['scale'] = int(self.pillow_scale_var.get())
+            else:
+                messagebox.showerror("参数错误", "Pillow压缩参数设置错误")
+                return None
         else:
-            return {}
-    
-    def _on_process_type_change(self):
-        """Handle process type change"""
-        process_type = self.process_type_var.get()
-        if process_type == ProcessType.RESIZE.value:
-            self._create_resize_params()
-        elif process_type == ProcessType.COMPRESS.value:
-            self._create_tinypng_params()
-    
-    def _on_resize_mode_change(self):
-        """Handle resize mode change"""
-        resize_mode = self.resize_mode_var.get()
-        if resize_mode == "percentage":
-            self._create_percentage_input()
-        else:
-            self._create_dimensions_input()
-    
-    def _on_output_mode_change(self, *args):
-        """Handle output mode change"""
-        output_mode = self.output_mode_var.get()
-        if output_mode == OutputMode.CUSTOM_DIR.value:
-            self.select_output_btn.config(state=tk.NORMAL)
-        else:
-            self.select_output_btn.config(state=tk.DISABLED)
-    
-    def _select_output_directory(self):
-        """Select output directory"""
-        from tkinter import filedialog
+            params = {}
         
-        directory_path = filedialog.askdirectory(title="选择输出目录")
-        if directory_path:
-            self.output_directory = directory_path
-            
-            if self._event_bus:
-                self._event_bus.publish(EventTypes.CONFIG_CHANGED, {
-                    'output_directory': directory_path
-                })
-    
-    def _on_process_clicked(self):
-        """Handle process button click"""
-        if self.command_executor.is_processing():
-            messagebox.showwarning("处理中", "请等待当前处理任务完成")
-            return
-
-        params = self._get_process_params()
-        if params is None:
-            return
-
-        # Get current file from file manager
-        # This is a temporary solution until the state is fully managed
-        from gui.managers.file_manager_view import FileManagerView
-        file_manager = self._parent.master.winfo_children()[0].winfo_children()[0]
-        if isinstance(file_manager, FileManagerView):
-            current_file = file_manager.get_current_file()
-            if not current_file:
-                messagebox.showerror("错误", "没有选中的文件")
-                return
-
-            # Generate output path
-            output_path = self._get_output_path(current_file)
-
-            strategy = self.processor_factory.get_strategy(self.process_type_var.get())
-            command = ProcessingCommandFactory.create_single_command(
-                strategy,
-                current_file,
-                output_path,
-                params
-            )
-            self.command_executor.execute_command(command, self._on_processing_complete)
-
-        if self._event_bus:
-            self._event_bus.publish(EventTypes.PROCESSING_STARTED, {
-                'type': 'single',
-                'params': params,
-                'output_mode': self.output_mode_var.get(),
-                'output_directory': self.output_directory
-            })
-    
-    def _get_output_path(self, input_path: str) -> str:
-        """Generate output path based on output mode"""
-        import os
+        if not 'params' in locals():
+            params = {}
         
-        output_mode = self.output_mode_var.get()
+        if hasattr(self, 'output_format_var'):
+            output_format = self.output_format_var.get()
+            if output_format != "保持原格式":
+                params['output_format'] = output_format
+                if output_format in ["JPEG", "WEBP"] and 'quality' not in params:
+                    params['quality'] = 85
         
-        if output_mode == 'overwrite':
-            return input_path
-        elif output_mode == 'new_folder':
-            # Create processed folder in same directory
-            dir_name = os.path.dirname(input_path)
-            base_name = os.path.basename(input_path)
-            name, ext = os.path.splitext(base_name)
-            processed_dir = os.path.join(dir_name, 'processed')
-            
-            # Create processed directory if it doesn't exist
-            os.makedirs(processed_dir, exist_ok=True)
-            
-            return os.path.join(processed_dir, f"{name}_processed{ext}")
-        elif output_mode == 'custom_dir' and self.output_directory:
-            # Use custom directory
-            base_name = os.path.basename(input_path)
-            
-            # Create custom directory if it doesn't exist
-            os.makedirs(self.output_directory, exist_ok=True)
-            
-            return os.path.join(self.output_directory, base_name)
+        if hasattr(self, 'meta_override_var'):
+            params['meta_override'] = self.meta_override_var.get()
+        
+        return params
+    
+    def process_image(self):
+        """处理当前图片"""
+        # 此方法需要由主窗口提供当前图片路径
+        pass
+    
+    def batch_process_images(self):
+        """批量处理图片"""
+        # 此方法需要由主窗口提供文件列表
+        pass
+    
+    def stop_processing(self):
+        """停止处理"""
+        self.processor.stop_all_processing()
+        logger.info("正在停止处理...")
+    
+    def set_processing_state(self, is_processing: bool):
+        """设置处理状态"""
+        self.is_processing = is_processing
+        if is_processing:
+            self.process_btn.config(state=tk.DISABLED)
+            self.batch_process_btn.config(state=tk.DISABLED)
+            self.stop_btn.config(state=tk.NORMAL)
         else:
-            # Fallback to same directory with suffix
-            dir_name = os.path.dirname(input_path)
-            base_name = os.path.basename(input_path)
-            name, ext = os.path.splitext(base_name)
-            return os.path.join(dir_name, f"{name}_processed{ext}")
-    
-    def _on_stop_clicked(self):
-        """Handle stop button click"""
-        if self._event_bus:
-            self._event_bus.publish(EventTypes.PROCESSING_STOPPED)
-    
-    def _on_batch_process_clicked(self):
-        """Handle batch process button click"""
-        if self.command_executor.is_processing():
-            messagebox.showwarning("处理中", "请等待当前处理任务完成")
-            return
-
-        params = self._get_process_params()
-        if params is None:
-            return
-
-        # Get all files from file manager
-        from gui.managers.file_manager_view import FileManagerView
-        file_manager_view = self._parent.master.winfo_children()[0].winfo_children()[0]
-        if isinstance(file_manager_view, FileManagerView):
-            files = file_manager_view.get_all_files()
-            if not files:
-                messagebox.showerror("错误", "没有要处理的文件")
-                return
-
-            from processing.models import BatchProcessingOptions, ProcessingOptions
-            options = ProcessingOptions(
-                process_type=self.process_type_var.get(),
-                output_mode=self.output_mode_var.get(),
-                output_dir=self.output_directory,
-                params=params
-            )
-            batch_options = BatchProcessingOptions(
-                files=files,
-                options=options
-            )
-
-            from core.file_manager import FileManager
-            file_manager = FileManager(self.config)
-            
-            strategy = self.processor_factory.get_strategy(self.process_type_var.get())
-            command = ProcessingCommandFactory.create_batch_command(
-                strategy,
-                file_manager,
-                batch_options,
-                self._on_batch_progress
-            )
-            self.command_executor.execute_command(command, self._on_batch_process_complete)
-
-        if self._event_bus:
-            self._event_bus.publish(EventTypes.PROCESSING_STARTED, {
-                'type': 'batch',
-                'params': params,
-                'output_mode': self.output_mode_var.get(),
-                'output_directory': self.output_directory
-            })
-    
-    # Event handlers
-    def _on_file_selected(self, event):
-        """Handle file selected event"""
-        if event.data and 'file_path' in event.data:
             self.process_btn.config(state=tk.NORMAL)
-
-    def _on_files_loaded(self, event):
-        """Handle files loaded event"""
-        if event.data and 'file_count' in event.data:
-            file_count = event.data['file_count']
-            if file_count > 0:
-                self.batch_process_btn.config(state=tk.NORMAL)
-            else:
-                self.batch_process_btn.config(state=tk.DISABLED)
+            self.batch_process_btn.config(state=tk.NORMAL)
+            self.stop_btn.config(state=tk.DISABLED)
     
-    def _on_processing_started(self, event):
-        """Handle processing started event"""
-        self._set_processing_state(True)
+    def enable_processing(self, enable: bool = True):
+        """启用/禁用处理按钮"""
+        state = tk.NORMAL if enable else tk.DISABLED
+        self.process_btn.config(state=state)
     
-    def _on_batch_progress(self, file_path, current, total):
-        """Handle batch progress"""
-        if self._event_bus:
-            self._event_bus.publish(EventTypes.PROCESSING_PROGRESS, {
-                'file_path': file_path,
-                'current': current,
-                'total': total
-            })
-
-    def _on_batch_process_complete(self, results):
-        """Handle batch process complete"""
-        # Reset processing state regardless of result
-        self._set_processing_state(False)
-        
-        if self._event_bus:
-            summary = f"批量处理完成! 成功: {len([r for r in results if r.success])}/{len(results)}"
-            self._event_bus.publish(EventTypes.PROCESSING_COMPLETE, {
-                'results': results,
-                'summary': summary
-            })
-
-    def _on_processing_complete(self, results):
-        """Handle single processing complete"""
-        # Reset processing state regardless of result
-        self._set_processing_state(False)
-        
-        if self._event_bus and results:
-            result = results[0]
-            if result.success:
-                info_text = f"处理完成! 输入: {result.input_size//1024}KB, 输出: {result.output_size//1024}KB"
-                if result.compression_ratio is not None:
-                    info_text += f", 压缩率: {result.compression_ratio:.1f}%"
-                self._event_bus.publish(EventTypes.PROCESSING_COMPLETE, {
-                    'result': result,
-                    'summary': info_text
-                })
-            else:
-                self._event_bus.publish(EventTypes.PROCESSING_ERROR, {'error': result.error})
-
+    def enable_batch_processing(self, enable: bool = True):
+        """启用/禁用批量处理按钮"""
+        state = tk.NORMAL if enable else tk.DISABLED
+        self.batch_process_btn.config(state=state)
     
-    def _on_processing_error(self, event):
-        """Handle processing error event"""
-        self._set_processing_state(False)
+    def set_callbacks(self, on_process_complete: Callable = None,
+                     on_process_error: Callable = None,
+                     on_batch_progress: Callable = None,
+                     on_batch_complete: Callable = None):
+        """设置回调函数"""
+        self.on_process_complete_callback = on_process_complete
+        self.on_process_error_callback = on_process_error
+        self.on_batch_progress_callback = on_batch_progress
+        self.on_batch_complete_callback = on_batch_complete
     
-    def _on_processing_stopped(self, event):
-        """Handle processing stopped event"""
-        self._set_processing_state(False)
+    def get_output_mode(self) -> str:
+        """获取输出模式"""
+        return self.output_mode_var.get()
+    
+    def get_output_directory(self) -> Optional[str]:
+        """获取输出目录"""
+        return self.output_directory
+    
+    def get_process_type(self) -> str:
+        """获取处理类型"""
+        return self.process_type_var.get()
+    
+    def grid(self, **kwargs):
+        """放置处理控制区域到指定位置"""
+        self.control_frame.grid(**kwargs)

@@ -1,10 +1,10 @@
 """
-主窗口GUI模块
-提供主要的用户界面
+主窗口GUI模块（重构版）
+负责应用程序整体布局和管理器协调
 """
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 import os
 import threading
@@ -13,12 +13,21 @@ from typing import Optional, List, Dict, Any
 from core.image_processor import ImageProcessor
 from core.file_manager import FileManager
 from gui.asset_cleaner_panel import AssetCleanerPanel
+from gui.managers.status_bar_manager import StatusBarManager
+from gui.managers.preview_manager import PreviewManager
+from gui.managers.file_manager_view import FileManagerView
+from gui.managers.process_control_manager import ProcessControlManager
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class ImageProcessorGUI:
-    """图像处理器主窗口类"""
+    """图像处理器主窗口类（协调器）"""
     
     def __init__(self, root, config):
-        """初始化主窗口
+        """
+        初始化主窗口
         
         Args:
             root: Tk根窗口
@@ -31,8 +40,6 @@ class ImageProcessorGUI:
         
         # 当前文件相关
         self.current_image_path = ""
-        self.current_image_tk = None
-        self.processed_image_tk = None
         
         # 处理相关
         self.processing_thread = None
@@ -41,1258 +48,248 @@ class ImageProcessorGUI:
         # 处理结果缓存
         self.processed_results = {}  # 存储输入路径到输出路径的映射
         
-        # 设置窗口图标和标题
+        # 设置窗口标题
         self.root.title("ImageForge - 图像处理器")
+        
+        # 初始化管理器
+        self._init_managers()
+        
+        # 设置管理器回调
+        self._setup_callbacks()
+        
+        # 设置UI布局
         self.setup_ui()
-        self.bind_events()
         
         # 加载配置
-        self.load_resolution_filter_config()
-        self.load_sort_config()
-        self.load_format_filter_config()
-
-        # 绑定分辨率过滤控件事件
-        self.create_resolution_filter_controls()
+        self.file_manager_view.load_configurations()
+    
+    def _init_managers(self):
+        """初始化所有管理器"""
+        # 创建主框架
+        self.main_frame = ttk.Frame(self.root, padding="10")
+        
+        # 初始化状态栏管理器
+        self.status_bar = StatusBarManager(self.main_frame)
+        
+        # 预览管理器和处理控制管理器将在 create_main_content_area() 中创建
+        self.preview_manager = None
+        self.process_control = None
+        
+        # 创建文件管理视图（需要在资源清理面板创建后设置）
+        self.file_manager_view = None  # 稍后初始化
+    
+    def _setup_callbacks(self):
+        """设置管理器间的回调函数"""
+        # 文件管理视图回调将在创建后设置
+        pass
     
     def setup_ui(self):
-        """设置用户界面"""
-        # 创建主框架
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        
+        """设置用户界面布局"""
         # 配置根窗口网格权重
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         
-        # 配置主框架网格权重
-        main_frame.columnconfigure(0, weight=2)  # 左侧内容区域
-        main_frame.columnconfigure(1, weight=1)  # 右侧面板区域
-        main_frame.rowconfigure(0, weight=0)     # 文件选择区域
-        main_frame.rowconfigure(1, weight=1)     # 预览和控制区域
-        main_frame.rowconfigure(2, weight=0)     # 状态栏区域
+        # 主框架布局
+        self.main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
-        # 文件选择区域（跨越两列）
-        self.create_file_selection_area(main_frame)
+        # 配置主框架网格权重
+        self.main_frame.columnconfigure(0, weight=2)  # 左侧内容区域
+        self.main_frame.columnconfigure(1, weight=1)  # 右侧面板区域
+        self.main_frame.rowconfigure(0, weight=0)     # 文件选择区域
+        self.main_frame.rowconfigure(1, weight=1)     # 预览和控制区域
+        self.main_frame.rowconfigure(2, weight=0)     # 状态栏区域
+        
+        # 创建资源清理面板（右侧）
+        self.create_asset_cleaner_panel()
+        
+        # 现在可以创建文件管理视图了（因为需要asset_cleaner_panel）
+        self.file_manager_view = FileManagerView(
+            self.main_frame, self.config, self.file_manager, self.asset_cleaner_panel
+        )
+        self.file_manager_view.set_callbacks(
+            on_file_selected=self.on_file_selected,
+            on_navigation=self.on_navigation,
+            on_filter_changed=self.on_filter_changed
+        )
+        
+        # 放置文件选择区域（跨越两列）
+        self.file_manager_view.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 5))
         
         # 创建左右分区
-        self.create_main_content_area(main_frame)
+        self.create_main_content_area()
         
-        # 状态栏（跨越两列）
-        self.create_status_bar(main_frame)
+        # 放置状态栏（跨越两列）
+        self.status_bar.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
     
-    def create_file_selection_area(self, parent):
-        """创建文件选择区域"""
-        file_frame = ttk.LabelFrame(parent, text="文件选择", padding="5")
-        file_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 5))
-        
-        # 文件路径显示
-        self.file_path_var = tk.StringVar()
-        file_path_entry = ttk.Entry(file_frame, textvariable=self.file_path_var, width=60)
-        file_path_entry.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 10))
-        
-        # 选择文件按钮
-        select_file_btn = ttk.Button(file_frame, text="选择文件", command=self.select_single_file)
-        select_file_btn.grid(row=0, column=1, padx=(0, 5))
-        
-        # 选择文件夹按钮
-        select_folder_btn = ttk.Button(file_frame, text="选择文件夹", command=self.select_directory)
-        select_folder_btn.grid(row=0, column=2, padx=(0, 5))
-        
-        # 文件导航按钮
-        self.prev_btn = ttk.Button(file_frame, text="上一张", command=self.show_previous_image, state=tk.DISABLED)
-        self.prev_btn.grid(row=0, column=3, padx=(0, 5))
-        
-        self.next_btn = ttk.Button(file_frame, text="下一张", command=self.show_next_image, state=tk.DISABLED)
-        self.next_btn.grid(row=0, column=4)
-        
-        # 文件计数标签
-        self.file_count_label = ttk.Label(file_frame, text="0/0")
-        self.file_count_label.grid(row=0, column=5, padx=(10, 0))
-        
-        # 递归选项
-        recursive_frame = ttk.Frame(file_frame)
-        recursive_frame.grid(row=1, column=0, columnspan=6, sticky=(tk.W, tk.E), pady=(2, 2))
-        
-        self.recursive_var = tk.BooleanVar(value=True)
-        recursive_check = ttk.Checkbutton(recursive_frame, text="递归读取子目录", 
-                                        variable=self.recursive_var,
-                                        command=self.on_recursive_change)
-        recursive_check.pack(side=tk.LEFT, padx=(0, 10))
-        
-        self.recursive_hint_label = ttk.Label(recursive_frame, text="(勾选后读取文件夹及其所有子文件夹中的图片)", 
-                                           foreground="gray", font=("Arial", 9))
-        self.recursive_hint_label.pack(side=tk.LEFT)
-        
-        # 分辨率过滤选项
-        filter_frame = ttk.Frame(file_frame)
-        filter_frame.grid(row=2, column=0, columnspan=6, sticky=(tk.W, tk.E), pady=(2, 2))
-        
-        self.resolution_filter_var = tk.BooleanVar(value=False)
-        filter_check = ttk.Checkbutton(filter_frame, text="启用分辨率过滤", 
-                                     variable=self.resolution_filter_var,
-                                     command=self.on_resolution_filter_change)
-        filter_check.pack(side=tk.LEFT, padx=(0, 10))
-        
-        # 分辨率输入区域
-        self.resolution_input_frame = ttk.Frame(filter_frame)
-        self.resolution_input_frame.pack(side=tk.LEFT)
-        
-        ttk.Label(self.resolution_input_frame, text="最小分辨率:").pack(side=tk.LEFT, padx=(0, 5))
-        
-        self.min_width_var = tk.StringVar(value="1920")
-        width_spinbox = ttk.Spinbox(self.resolution_input_frame, from_=1, to=10000, 
-                                   textvariable=self.min_width_var, width=8)
-        width_spinbox.pack(side=tk.LEFT, padx=(0, 2))
-        
-        ttk.Label(self.resolution_input_frame, text="×").pack(side=tk.LEFT, padx=(2, 2))
-        
-        self.min_height_var = tk.StringVar(value="1080")
-        height_spinbox = ttk.Spinbox(self.resolution_input_frame, from_=1, to=10000, 
-                                    textvariable=self.min_height_var, width=8)
-        height_spinbox.pack(side=tk.LEFT, padx=(2, 5))
-        
-        ttk.Label(self.resolution_input_frame, text="像素").pack(side=tk.LEFT)
-        
-        # 分辨率过滤提示标签
-        self.resolution_hint_label = ttk.Label(filter_frame, text="(启用后只处理等于或高于指定分辨率的图片)", 
-                                             foreground="gray", font=("Arial", 9))
-        self.resolution_hint_label.pack(side=tk.LEFT, padx=(10, 0))
-        
-        # 图片格式筛选选项
-        format_frame = ttk.Frame(file_frame)
-        format_frame.grid(row=3, column=0, columnspan=6, sticky=(tk.W, tk.E), pady=(2, 2))
-
-        ttk.Label(format_frame, text="图片格式:").pack(side=tk.LEFT, padx=(0, 10))
-
-        # 格式筛选选项
-        self.format_filter_var = tk.StringVar(value="全部格式")
-        format_combo = ttk.Combobox(format_frame, textvariable=self.format_filter_var,
-                                   values=["全部格式", "仅JPEG", "仅PNG", "仅BMP", "仅GIF", "仅TIFF", "仅WEBP"],
-                                   width=12, state="readonly")
-        format_combo.pack(side=tk.LEFT, padx=(0, 10))
-
-        # 格式筛选提示标签
-        self.format_hint_label = ttk.Label(format_frame, text="(选择要读取的图片格式类型)",
-                                         foreground="gray", font=("Arial", 9))
-        self.format_hint_label.pack(side=tk.LEFT, padx=(10, 0))
-
-        # 绑定格式变化事件
-        self.format_filter_var.trace('w', self.on_format_filter_change)
-
-        # 文件排序选项
-        sort_frame = ttk.Frame(file_frame)
-        sort_frame.grid(row=4, column=0, columnspan=6, sticky=(tk.W, tk.E), pady=(2, 2))
-
-        ttk.Label(sort_frame, text="文件排序:").pack(side=tk.LEFT, padx=(0, 10))
-
-        self.sort_option_var = tk.StringVar(value="file_size_desc")
-        sort_combo = ttk.Combobox(sort_frame, textvariable=self.sort_option_var,
-                                 values=["按文件大小(大到小)", "按文件大小(小到大)",
-                                        "按分辨率宽度(大到小)", "按分辨率宽度(小到大)",
-                                        "按分辨率高度(大到小)", "按分辨率高度(小到大)",
-                                        "按文件名(A-Z)", "按文件名(Z-A)"],
-                                 width=18, state="readonly")
-        sort_combo.pack(side=tk.LEFT, padx=(0, 10))
-
-        # 排序提示标签
-        self.sort_hint_label = ttk.Label(sort_frame, text="(选择文件列表排序方式)",
-                                       foreground="gray", font=("Arial", 9))
-        self.sort_hint_label.pack(side=tk.LEFT, padx=(10, 0))
-
-        # 绑定排序变化事件
-        self.sort_option_var.trace('w', self.on_sort_option_change)
-        
-        # 初始化分辨率过滤状态
-        self.on_resolution_filter_change()
-        
-        file_frame.columnconfigure(0, weight=1)
-    
-    def create_main_content_area(self, parent):
+    def create_main_content_area(self):
         """创建主内容区域（左右分区）"""
         # 左侧内容区域
-        left_frame = ttk.Frame(parent)
+        left_frame = ttk.Frame(self.main_frame)
         left_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5))
         
         left_frame.rowconfigure(0, weight=1)     # 预览区域
         left_frame.rowconfigure(1, weight=0)     # 控制面板
         left_frame.columnconfigure(0, weight=1)
         
-        # 图片预览区域
-        self.create_preview_area(left_frame)
+        # 创建预览管理器（使用 left_frame 作为父容器）
+        self.preview_manager = PreviewManager(left_frame, self.config, self.processor)
+        self.preview_manager.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
         
-        # 控制面板区域
-        self.create_control_panel(left_frame)
-        
-        # 右侧面板区域
-        right_frame = ttk.Frame(parent)
+        # 创建处理控制管理器（使用 left_frame 作为父容器）
+        self.process_control = ProcessControlManager(
+            left_frame, self.config, self.processor, self.file_manager
+        )
+        self.process_control.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+    
+    def create_asset_cleaner_panel(self):
+        """创建资源清理面板"""
+        right_frame = ttk.Frame(self.main_frame)
         right_frame.grid(row=1, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0))
         
         right_frame.rowconfigure(0, weight=1)
         right_frame.columnconfigure(0, weight=1)
         
-        # 资源清理面板
-        self.create_asset_cleaner_panel(right_frame)
-    
-    def create_preview_area(self, parent):
-        """创建图片预览区域"""
-        preview_frame = ttk.LabelFrame(parent, text="图片预览", padding="10")
-        preview_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
-        
-        # 预览容器
-        preview_container = ttk.Frame(preview_frame)
-        preview_container.pack(fill=tk.BOTH, expand=True)
-        
-        # 原图预览
-        original_frame = ttk.LabelFrame(preview_container, text="原图", padding="5")
-        original_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
-        
-        self.original_label = ttk.Label(original_frame, text="请选择图片文件", 
-                                      relief=tk.SUNKEN, anchor=tk.CENTER)
-        self.original_label.pack(fill=tk.BOTH, expand=True)
-        
-        # 原图分辨率标签
-        self.original_resolution_label = ttk.Label(original_frame, text="", 
-                                                 foreground="gray", font=("Arial", 9))
-        self.original_resolution_label.pack(pady=(2, 0))
-        
-        # 处理后预览
-        processed_frame = ttk.LabelFrame(preview_container, text="处理后", padding="5")
-        processed_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
-        
-        self.processed_label = ttk.Label(processed_frame, text="等待处理", 
-                                        relief=tk.SUNKEN, anchor=tk.CENTER)
-        self.processed_label.pack(fill=tk.BOTH, expand=True)
-        
-        # 处理后分辨率标签
-        self.processed_resolution_label = ttk.Label(processed_frame, text="", 
-                                                  foreground="gray", font=("Arial", 9))
-        self.processed_resolution_label.pack(pady=(2, 0))
-            
-        preview_container.columnconfigure(0, weight=1)
-        preview_container.columnconfigure(1, weight=1)
-    
-    def create_control_panel(self, parent):
-        """创建控制面板区域"""
-        control_frame = ttk.LabelFrame(parent, text="处理控制", padding="10")
-        control_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        
-        # 处理方式选择
-        process_frame = ttk.Frame(control_frame)
-        process_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        ttk.Label(process_frame, text="处理方式:").pack(side=tk.LEFT, padx=(0, 10))
-        
-        self.process_type_var = tk.StringVar(value="resize")
-        resize_radio = ttk.Radiobutton(process_frame, text="调整分辨率", 
-                                      variable=self.process_type_var, value="resize",
-                                      command=self.on_process_type_change)
-        resize_radio.pack(side=tk.LEFT, padx=(0, 10))
-        
-        compress_radio = ttk.Radiobutton(process_frame, text="TinyPNG压缩", 
-                                        variable=self.process_type_var, value="compress",
-                                        command=self.on_process_type_change)
-        compress_radio.pack(side=tk.LEFT, padx=(0, 10))
-        
-        pillow_compress_radio = ttk.Radiobutton(process_frame, text="Pillow压缩", 
-                                              variable=self.process_type_var, value="pillow_compress",
-                                              command=self.on_process_type_change)
-        pillow_compress_radio.pack(side=tk.LEFT)
-        
-        # 参数设置区域
-        self.params_frame = ttk.Frame(control_frame)
-        self.params_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        self.create_resize_params()
-        
-        # 输出选项
-        output_frame = ttk.Frame(control_frame)
-        output_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        ttk.Label(output_frame, text="输出方式:").pack(side=tk.LEFT, padx=(0, 10))
-        
-        self.output_mode_var = tk.StringVar(value="new_folder")
-        overwrite_radio = ttk.Radiobutton(output_frame, text="覆盖原图", 
-                                         variable=self.output_mode_var, value="overwrite")
-        overwrite_radio.pack(side=tk.LEFT, padx=(0, 10))
-        
-        new_folder_radio = ttk.Radiobutton(output_frame, text="新建文件夹", 
-                                          variable=self.output_mode_var, value="new_folder")
-        new_folder_radio.pack(side=tk.LEFT, padx=(0, 10))
-        
-        custom_dir_radio = ttk.Radiobutton(output_frame, text="指定目录", 
-                                          variable=self.output_mode_var, value="custom_dir")
-        custom_dir_radio.pack(side=tk.LEFT, padx=(0, 10))
-        
-        self.select_output_btn = ttk.Button(output_frame, text="选择目录", 
-                                          command=self.select_output_directory, 
-                                          state=tk.DISABLED)
-        self.select_output_btn.pack(side=tk.LEFT)
-        
-        # 处理按钮
-        button_frame = ttk.Frame(control_frame)
-        button_frame.pack(fill=tk.X)
-        
-        self.process_btn = ttk.Button(button_frame, text="处理图片", 
-                                     command=self.process_image, state=tk.DISABLED)
-        self.process_btn.pack(side=tk.LEFT, padx=(0, 10))
-        
-        self.stop_btn = ttk.Button(button_frame, text="停止处理", 
-                                  command=self.stop_processing, state=tk.DISABLED)
-        self.stop_btn.pack(side=tk.LEFT, padx=(0, 10))
-        
-        self.batch_process_btn = ttk.Button(button_frame, text="批量处理", 
-                                           command=self.batch_process_images, state=tk.DISABLED)
-        self.batch_process_btn.pack(side=tk.LEFT, padx=(10, 0))
-        
-        # 格式转换选项
-        ttk.Label(button_frame, text="输出格式:").pack(side=tk.LEFT, padx=(10, 5))
-        
-        self.output_format_var = tk.StringVar(value="保持原格式")
-        format_combo = ttk.Combobox(button_frame, textvariable=self.output_format_var, 
-                                   values=["保持原格式", "JPEG", "PNG", "WEBP", "BMP", "TIFF"], 
-                                   width=12, state="readonly")
-        format_combo.pack(side=tk.LEFT, padx=(0, 10))
-        
-        # Meta覆盖选项
-        self.meta_override_var = tk.BooleanVar(value=False)
-        meta_override_checkbox = ttk.Checkbutton(button_frame, text="Meta覆盖", 
-                                               variable=self.meta_override_var)
-        meta_override_checkbox.pack(side=tk.LEFT, padx=(10, 0))
-        
-    def create_asset_cleaner_panel(self, parent):
-        """创建资源清理面板"""
-        # 创建资源清理面板，传递统一的文件夹选择方法和同步回调
         self.asset_cleaner_panel = AssetCleanerPanel(
-            parent, 
+            right_frame, 
             self.config, 
             self.select_folder_dialog,
             self.set_directory_from_asset_cleaner
         )
         
-        # 将面板放置在右侧区域
         self.asset_cleaner_panel.panel_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
     
-    def create_status_bar(self, parent):
-        """创建状态栏"""
-        status_frame = ttk.Frame(parent)
-        status_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
-        
-        self.status_label = ttk.Label(status_frame, text="就绪", relief=tk.SUNKEN)
-        self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        # 进度条
-        self.progress_var = tk.DoubleVar()
-        self.progress_bar = ttk.Progressbar(status_frame, variable=self.progress_var, 
-                                          maximum=100, length=200)
-        self.progress_bar.pack(side=tk.RIGHT, padx=(10, 0))
-    
-    def create_resize_params(self):
-        """创建分辨率调整参数控件"""
-        # 清空现有控件
-        for widget in self.params_frame.winfo_children():
-            widget.destroy()
-        
-        ttk.Label(self.params_frame, text="调整方式:").pack(side=tk.LEFT, padx=(0, 10))
-        
-        self.resize_mode_var = tk.StringVar(value="percentage")
-        percentage_radio = ttk.Radiobutton(self.params_frame, text="百分比", 
-                                          variable=self.resize_mode_var, value="percentage",
-                                          command=self.on_resize_mode_change)
-        percentage_radio.pack(side=tk.LEFT, padx=(0, 10))
-        
-        dimensions_radio = ttk.Radiobutton(self.params_frame, text="指定尺寸", 
-                                          variable=self.resize_mode_var, value="dimensions",
-                                          command=self.on_resize_mode_change)
-        dimensions_radio.pack(side=tk.LEFT)
-        
-        # 参数输入区域
-        self.param_input_frame = ttk.Frame(self.params_frame)
-        self.param_input_frame.pack(side=tk.LEFT, padx=(20, 0))
-        
-        self.on_resize_mode_change()
-    
-    def create_percentage_input(self):
-        """创建百分比输入控件"""
-        for widget in self.param_input_frame.winfo_children():
-            widget.destroy()
-        
-        ttk.Label(self.param_input_frame, text="百分比:").pack(side=tk.LEFT)
-        
-        self.percentage_var = tk.StringVar(value="50")
-        percentage_spinbox = ttk.Spinbox(self.param_input_frame, from_=1, to=200, 
-                                       textvariable=self.percentage_var, width=10)
-        percentage_spinbox.pack(side=tk.LEFT, padx=(5, 10))
-        
-        ttk.Label(self.param_input_frame, text="%").pack(side=tk.LEFT)
-    
-    def create_dimensions_input(self):
-        """创建尺寸输入控件"""
-        for widget in self.param_input_frame.winfo_children():
-            widget.destroy()
-        
-        # 宽度和高度输入
-        size_frame = ttk.Frame(self.param_input_frame)
-        size_frame.pack(side=tk.TOP, pady=(0, 10))
-        
-        ttk.Label(size_frame, text="宽度:").pack(side=tk.LEFT)
-        
-        self.width_var = tk.StringVar(value="800")
-        width_spinbox = ttk.Spinbox(size_frame, from_=1, to=5000, 
-                                   textvariable=self.width_var, width=10)
-        width_spinbox.pack(side=tk.LEFT, padx=(5, 10))
-        
-        ttk.Label(size_frame, text="高度:").pack(side=tk.LEFT)
-        
-        self.height_var = tk.StringVar(value="600")
-        height_spinbox = ttk.Spinbox(size_frame, from_=1, to=5000, 
-                                    textvariable=self.height_var, width=10)
-        height_spinbox.pack(side=tk.LEFT, padx=(5, 0))
-        
-        # 宽高比选项
-        aspect_frame = ttk.Frame(self.param_input_frame)
-        aspect_frame.pack(side=tk.TOP)
-        
-        self.maintain_aspect_var = tk.BooleanVar(value=True)
-        aspect_check = ttk.Checkbutton(aspect_frame, text="保持宽高比", 
-                                      variable=self.maintain_aspect_var,
-                                      command=self.on_aspect_ratio_change)
-        aspect_check.pack(side=tk.LEFT, padx=(0, 10))
-        
-        # 提示标签
-        self.aspect_hint_label = ttk.Label(aspect_frame, text="(保持比例，图片可能不完全匹配指定尺寸)", 
-                                         foreground="gray", font=("Arial", 9))
-        self.aspect_hint_label.pack(side=tk.LEFT)
-    
-    def create_tinypng_params(self):
-        """创建TinyPNG压缩参数控件"""
-        # 清空现有控件
-        for widget in self.params_frame.winfo_children():
-            widget.destroy()
-        
-        # TinyPNG API密钥输入
-        api_key_frame = ttk.Frame(self.params_frame)
-        api_key_frame.pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Label(api_key_frame, text="API KEY:").pack(side=tk.LEFT, padx=(0, 5))
-        
-        # 获取当前的API密钥，如果没有则使用默认值
-        current_api_key = self.config.get_tinypng_api_key()
-        default_api_key = "4PGdmZhdCHG9NJ53VMl2kTZfcFCFTTNH"
-        api_key_value = current_api_key if current_api_key and current_api_key != 'your_tinypng_api_key_here' else default_api_key
-        
-        self.tinypng_api_key_var = tk.StringVar(value=api_key_value)
-        api_key_entry = ttk.Entry(api_key_frame, textvariable=self.tinypng_api_key_var, width=40)
-        api_key_entry.pack(side=tk.LEFT, padx=(5, 10))
-        
-        # 保存API密钥按钮
-        save_api_key_btn = ttk.Button(api_key_frame, text="保存", command=self.save_tinypng_api_key)
-        save_api_key_btn.pack(side=tk.LEFT)
-        
-        # API密钥状态标签
-        self.api_key_status_label = ttk.Label(api_key_frame, text="", foreground="gray", font=("Arial", 9))
-        self.api_key_status_label.pack(side=tk.LEFT, padx=(10, 0))
-        
-        # 更新API密钥状态
-        self.update_api_key_status()
-    
-    def update_api_key_status(self):
-        """更新API密钥状态"""
-        api_key = self.tinypng_api_key_var.get() if hasattr(self, 'tinypng_api_key_var') else ''
-        if api_key:
-            if api_key == "4PGdmZhdCHG9NJ53VMl2kTZfcFCFTTNH":
-                status_text = "(使用默认API密钥)"
-                color = "green"
-            else:
-                status_text = "(自定义API密钥)"
-                color = "blue"
-        else:
-            status_text = "(未设置API密钥)"
-            color = "red"
-        
-        if hasattr(self, 'api_key_status_label'):
-            self.api_key_status_label.config(text=status_text, foreground=color)
-    
-    def create_pillow_compress_params(self):
-        """创建Pillow压缩参数控件"""
-        # 清空现有控件
-        for widget in self.params_frame.winfo_children():
-            widget.destroy()
-        
-        # 质量设置
-        quality_frame = ttk.Frame(self.params_frame)
-        quality_frame.pack(side=tk.LEFT, padx=(0, 20))
-        
-        ttk.Label(quality_frame, text="压缩质量:").pack(side=tk.LEFT, padx=(0, 5))
-        
-        self.pillow_quality_var = tk.StringVar(value="85")
-        quality_spinbox = ttk.Spinbox(quality_frame, from_=1, to=100, 
-                                    textvariable=self.pillow_quality_var, width=10)
-        quality_spinbox.pack(side=tk.LEFT, padx=(5, 5))
-        
-        # 质量说明标签
-        self.pillow_quality_hint_label = ttk.Label(quality_frame, text="(1-100, 数值越小压缩率越高)", foreground="gray", font=("Arial", 9))
-        self.pillow_quality_hint_label.pack(side=tk.LEFT)
-        
-        # 绑定质量变化事件
-        self.pillow_quality_var.trace('w', self.on_pillow_quality_change)
-        
-        # 压缩模式选择
-        mode_frame = ttk.Frame(self.params_frame)
-        mode_frame.pack(side=tk.LEFT, padx=(0, 10))
-        
-        ttk.Label(mode_frame, text="压缩模式:").pack(side=tk.LEFT, padx=(0, 5))
-        
-        self.pillow_mode_var = tk.StringVar(value="optimize")
-        optimize_radio = ttk.Radiobutton(mode_frame, text="优化质量", 
-                                       variable=self.pillow_mode_var, value="optimize")
-        optimize_radio.pack(side=tk.LEFT, padx=(0, 5))
-        
-        resize_radio = ttk.Radiobutton(mode_frame, text="缩放压缩", 
-                                     variable=self.pillow_mode_var, value="resize_optimize")
-        resize_radio.pack(side=tk.LEFT)
-        
-        # 缩放参数（仅在缩放压缩模式下显示）
-        self.pillow_resize_frame = ttk.Frame(self.params_frame)
-        self.pillow_resize_frame.pack(side=tk.LEFT, padx=(20, 0))
-        
-        ttk.Label(self.pillow_resize_frame, text="缩放比例:").pack(side=tk.LEFT)
-        
-        self.pillow_scale_var = tk.StringVar(value="80")
-        scale_spinbox = ttk.Spinbox(self.pillow_resize_frame, from_=10, to=100, 
-                                  textvariable=self.pillow_scale_var, width=10)
-        scale_spinbox.pack(side=tk.LEFT, padx=(5, 5))
-        
-        ttk.Label(self.pillow_resize_frame, text="%").pack(side=tk.LEFT)
-        
-        # 绑定压缩模式变化事件
-        self.pillow_mode_var.trace('w', self.on_pillow_mode_change)
-        
-        # 初始化显示状态
-        self.on_pillow_mode_change()
-        self.on_pillow_quality_change()
-    
-    def create_resolution_filter_controls(self):
-        """创建分辨率过滤控件的事件绑定"""
-        # 为宽度和高度输入框绑定变化事件
-        if hasattr(self, 'min_width_var') and hasattr(self, 'min_height_var'):
-            self.min_width_var.trace('w', self.on_resolution_filter_value_change)
-            self.min_height_var.trace('w', self.on_resolution_filter_value_change)
-    
-    def on_resolution_filter_value_change(self, *args):
-        """处理分辨率过滤数值变化"""
-        # 保存配置
-        self.save_resolution_filter_config()
-        
-        # 如果已经有文件夹选择，重新加载文件并清空缓存
-        if self.file_manager.current_directory:
-            self.reload_current_directory()
-    
-    def on_format_filter_change(self, *args):
-        """处理图片格式筛选变化"""
-        # 保存格式筛选配置
-        self.save_format_filter_config()
-
-        # 如果已经有文件夹选择，重新加载文件并清空缓存
-        if self.file_manager.current_directory:
-            self.reload_current_directory()
-
-    def on_sort_option_change(self, *args):
-        """处理排序选项变化"""
-        # 保存排序配置
-        self.save_sort_config()
-        
-        # 如果已经有文件夹选择，重新加载文件并清空缓存
-        if self.file_manager.current_directory:
-            self.reload_current_directory()
-    
-    def on_pillow_mode_change(self, *args):
-        """处理Pillow压缩模式变化"""
-        if hasattr(self, 'pillow_mode_var') and hasattr(self, 'pillow_resize_frame'):
-            if self.pillow_mode_var.get() == "resize_optimize":
-                self.pillow_resize_frame.pack(side=tk.LEFT, padx=(20, 0))
-            else:
-                self.pillow_resize_frame.pack_forget()
-    
-    def on_pillow_quality_change(self, *args):
-        """处理Pillow压缩质量变化"""
-        if hasattr(self, 'pillow_quality_var') and hasattr(self, 'pillow_quality_hint_label'):
-            try:
-                quality = int(self.pillow_quality_var.get())
-                if quality <= 10:
-                    hint_text = "(极限压缩: 极小文件，严重失真)"
-                    color = "red"
-                elif quality <= 30:
-                    hint_text = "(高压缩: 小文件，明显失真)"
-                    color = "orange"
-                elif quality <= 50:
-                    hint_text = "(中等压缩: 较小文件，轻微失真)"
-                    color = "blue"
-                elif quality <= 75:
-                    hint_text = "(轻度压缩: 轻微减小，质量良好)"
-                    color = "green"
-                else:
-                    hint_text = "(高质量: 文件较大，质量优秀)"
-                    color = "darkgreen"
-                
-                self.pillow_quality_hint_label.config(text=f"({quality}/100 {hint_text[1:]})", foreground=color)
-            except ValueError:
-                self.pillow_quality_hint_label.config(text="(1-100, 数值越小压缩率越高)", foreground="gray")
-    
-    def save_tinypng_api_key(self):
-        """保存TinyPNG API密钥"""
-        if not hasattr(self, 'tinypng_api_key_var'):
-            return
-        
-        api_key = self.tinypng_api_key_var.get().strip()
-        
-        # 验证API密钥格式（基本验证）
-        if len(api_key) < 10:
-            messagebox.showerror("API密钥错误", "API密钥长度不足，请检查输入")
-            return
-        
-        try:
-            # 保存到配置
-            self.config.set_tinypng_api_key(api_key)
-            self.config.save_config()
-            
-            # 更新处理器的API密钥
-            self.processor.set_tinypng_api_key(api_key)
-            
-            # 验证API密钥
-            if self.processor.validate_tinypng_api_key(api_key):
-                messagebox.showinfo("保存成功", "API密钥保存成功且验证通过")
-                self.api_key_status_label.config(text="(API密钥有效)", foreground="green")
-            else:
-                messagebox.showwarning("保存成功", "API密钥已保存，但验证失败，请检查网络连接或密钥正确性")
-                self.api_key_status_label.config(text="(API密钥验证失败)", foreground="orange")
-                
-        except Exception as e:
-            messagebox.showerror("保存失败", f"保存API密钥失败: {str(e)}")
-    
-    def on_aspect_ratio_change(self):
-        """处理宽高比选项变更"""
-        if self.maintain_aspect_var.get():
-            self.aspect_hint_label.config(text="(保持比例，图片可能不完全匹配指定尺寸)")
-        else:
-            self.aspect_hint_label.config(text="(强制调整，图片将完全匹配指定尺寸，可能变形)")
-    
-    def bind_events(self):
-        """绑定事件处理"""
-        # 输出模式变化
-        self.output_mode_var.trace('w', self.on_output_mode_change)
-    
-    def select_single_file(self):
-        """选择单个文件"""
-        # 获取当前格式筛选配置
-        format_filter = self.get_format_filter_config()
-
-        # 构建文件类型过滤器
-        if format_filter:
-            # 如果有格式筛选，只显示选定的格式
-            format_patterns = [f"*{ext}" for ext in format_filter]
-            filter_name = self.format_filter_var.get().replace("仅", "")
-            filetypes = [
-                (f"{filter_name}文件", " ".join(format_patterns)),
-                ("所有文件", "*.*")
-            ]
-        else:
-            # 显示所有支持的格式
-            filetypes = [
-                ("图片文件", "*.jpg *.jpeg *.png *.bmp *.gif *.tiff *.webp"),
-                ("所有文件", "*.*")
-            ]
-
-        file_path = filedialog.askopenfilename(
-            title="选择图片文件",
-            filetypes=filetypes
-        )
-
-        if file_path:
-            # 清空处理结果缓存，因为选择了新的文件
-            self.processed_results.clear()
-            self.load_image(file_path)
-    
-    def select_directory(self):
-        """选择文件夹"""
-        directory_path = self.select_folder_dialog("选择包含图片的文件夹")
-        
-        if directory_path:
-            # 同步到资源清理面板
-            self.sync_to_asset_cleaner(directory_path)
-
-            recursive = self.recursive_var.get()
-            resolution_filter = self.get_resolution_filter_config()
-            sort_config = self.get_sort_config()
-            format_filter = self.get_format_filter_config()
-
-            files = self.file_manager.select_directory_with_filter_and_sort(
-                directory_path, recursive, resolution_filter, sort_config, format_filter
-            )
-            
-            if files:
-                # 清空处理结果缓存，因为选择了新的文件集
-                self.processed_results.clear()
-                
-                self.load_image(files[0])
-                self.update_navigation_buttons()
-                self.update_file_count_label()
-                self.batch_process_btn.config(state=tk.NORMAL)
-                
-                # 构建状态信息
-                parts = [f"已加载 {len(files)} 个图片文件"]
-                if recursive:
-                    parts.append("及其子目录")
-                if resolution_filter['enabled']:
-                    parts.append(f"(分辨率≥{resolution_filter['min_width']}×{resolution_filter['min_height']})")
-                if format_filter:
-                    format_name = self.format_filter_var.get().replace("仅", "")
-                    parts.append(f"(仅{format_name}格式)")
-
-                status_text = "".join(parts)
-                self.status_label.config(text=status_text)
-            else:
-                # 构建错误信息
-                error_parts = ["所选文件夹中没有找到支持的图片文件"]
-                if resolution_filter['enabled']:
-                    error_parts.append(f"(分辨率要求≥{resolution_filter['min_width']}×{resolution_filter['min_height']})")
-                if format_filter:
-                    format_name = self.format_filter_var.get().replace("仅", "")
-                    error_parts.append(f"(格式要求: {format_name})")
-
-                error_text = " ".join(error_parts)
-                messagebox.showwarning("无图片文件", error_text)
-    
     def select_folder_dialog(self, title="选择文件夹"):
-        """统一的文件夹选择对话框
-        
-        Args:
-            title: 对话框标题
-            
-        Returns:
-            str: 选择的文件夹路径，如果取消则返回空字符串
-        """
+        """统一的文件夹选择对话框"""
+        from tkinter import filedialog
         return filedialog.askdirectory(title=title)
     
-    def sync_to_asset_cleaner(self, directory_path):
-        """同步文件夹路径到资源清理面板
-        
-        Args:
-            directory_path: 要同步的文件夹路径
-        """
-        if hasattr(self, 'asset_cleaner_panel') and self.asset_cleaner_panel:
-            self.asset_cleaner_panel.set_project_directory(directory_path)
-    
     def set_directory_from_asset_cleaner(self, directory_path):
-        """从资源清理面板同步文件夹路径到主窗口
-        
-        Args:
-            directory_path: 要同步的文件夹路径
-        """
+        """从资源清理面板同步文件夹路径到主窗口"""
         if directory_path:
-            # 设置文件夹路径到主窗口的文件路径输入框
-            self.file_path_var.set(directory_path)
-            
-            # 清空处理结果缓存，因为选择了新的文件集
+            self.file_manager_view.set_file_path(directory_path)
             self.processed_results.clear()
             
-            # 尝试加载该文件夹中的图片文件
-            recursive = self.recursive_var.get()
-            resolution_filter = self.get_resolution_filter_config()
-            sort_config = self.get_sort_config()
-            format_filter = self.get_format_filter_config()
-
+            filters = self.file_manager_view.get_current_filters()
             files = self.file_manager.select_directory_with_filter_and_sort(
-                directory_path, recursive, resolution_filter, sort_config, format_filter
+                directory_path, filters['recursive'], 
+                filters['resolution'], filters['sort'], filters['format']
             )
             
             if files:
                 self.load_image(files[0])
-                self.update_navigation_buttons()
-                self.update_file_count_label()
-                self.batch_process_btn.config(state=tk.NORMAL)
+                self.file_manager_view.update_navigation_buttons()
+                self.file_manager_view.update_file_count_label()
+                self.process_control.enable_batch_processing(True)
                 
-                # 构建状态信息
                 parts = [f"已同步并加载 {len(files)} 个图片文件"]
-                if recursive:
+                if filters['recursive']:
                     parts.append("及其子目录")
-                if resolution_filter['enabled']:
-                    parts.append(f"(分辨率≥{resolution_filter['min_width']}×{resolution_filter['min_height']})")
-                if format_filter:
-                    format_name = self.format_filter_var.get().replace("仅", "")
-                    parts.append(f"(仅{format_name}格式)")
-
-                status_text = "".join(parts)
-                self.status_label.config(text=status_text)
-            else:
-                # 如果文件夹中没有图片文件，只是更新路径，不加载图片
-                self.current_image_path = ""
-                self.original_label.config(image='', text="请选择图片文件")
-                self.original_resolution_label.config(text="")
-                self.processed_label.config(image='', text="等待处理")
-                self.processed_resolution_label.config(text="")
-                self.process_btn.config(state=tk.DISABLED)
-                self.prev_btn.config(state=tk.DISABLED)
-                self.next_btn.config(state=tk.DISABLED)
-                self.file_count_label.config(text="0/0")
-                self.batch_process_btn.config(state=tk.DISABLED)
+                if filters['resolution']['enabled']:
+                    parts.append(f"(分辨率≥{filters['resolution']['min_width']}×{filters['resolution']['min_height']})")
                 
-                # 构建错误信息
-                error_parts = [f"已同步到文件夹: {directory_path} (无支持的图片文件)"]
-                if resolution_filter['enabled']:
-                    error_parts.append(f"(分辨率要求≥{resolution_filter['min_width']}×{resolution_filter['min_height']})")
-                if format_filter:
-                    format_name = self.format_filter_var.get().replace("仅", "")
-                    error_parts.append(f"(格式要求: {format_name})")
-
-                status_text = " ".join(error_parts)
-                self.status_label.config(text=status_text)
+                self.status_bar.set_status("".join(parts))
+            else:
+                self.current_image_path = ""
+                self.preview_manager.clear_all()
+                self.process_control.enable_processing(False)
+                self.process_control.enable_batch_processing(False)
+                self.file_manager_view.update_navigation_buttons()
+                self.file_manager_view.update_file_count_label()
+                
+                self.status_bar.set_status(f"已同步到文件夹: {directory_path} (无支持的图片文件)")
     
-    def on_recursive_change(self):
-        """处理递归选项变更"""
-        if self.recursive_var.get():
-            self.recursive_hint_label.config(text="(勾选后读取文件夹及其所有子文件夹中的图片)")
-        else:
-            self.recursive_hint_label.config(text="(取消勾选后只读取当前文件夹中的图片)")
+    def on_file_selected(self, file_path: str, is_single: bool = True, all_files: List[str] = None):
+        """文件选择回调"""
+        self.processed_results.clear()
+        self.load_image(file_path)
         
-        # 如果已经有文件夹选择，重新加载文件并清空缓存
-        if self.file_manager.current_directory:
-            self.reload_current_directory()
+        if not is_single and all_files:
+            self.file_manager_view.update_navigation_buttons()
+            self.file_manager_view.update_file_count_label()
+            self.process_control.enable_batch_processing(True)
+            
+            filters = self.file_manager_view.get_current_filters()
+            parts = [f"已加载 {len(all_files)} 个图片文件"]
+            if filters['recursive']:
+                parts.append("及其子目录")
+            if filters['resolution']['enabled']:
+                parts.append(f"(分辨率≥{filters['resolution']['min_width']}×{filters['resolution']['min_height']})")
+            if filters['format']:
+                format_name = "、".join([ext.replace('.', '') for ext in filters['format']])
+                parts.append(f"(仅{format_name}格式)")
+            
+            self.status_bar.set_status("".join(parts))
     
-    def on_resolution_filter_change(self):
-        """处理分辨率过滤选项变更"""
-        if self.resolution_filter_var.get():
-            self.resolution_input_frame.pack(side=tk.LEFT)
-            self.resolution_hint_label.config(text="(启用后只处理等于或高于指定分辨率的图片)")
-        else:
-            self.resolution_input_frame.pack_forget()
-            self.resolution_hint_label.config(text="(禁用后将处理所有图片文件)")
-        
-        # 保存配置
-        self.save_resolution_filter_config()
-        
-        # 如果已经有文件夹选择，重新加载文件并清空缓存
-        if self.file_manager.current_directory:
-            self.reload_current_directory()
+    def on_navigation(self, file_path: str):
+        """导航回调"""
+        self.load_image(file_path)
     
-    def reload_current_directory(self):
-        """重新加载当前目录的文件"""
+    def on_filter_changed(self):
+        """过滤选项变化回调"""
         if not self.file_manager.current_directory:
             return
         
-        recursive = self.recursive_var.get()
-        resolution_filter = self.get_resolution_filter_config()
-        sort_config = self.get_sort_config()
-        format_filter = self.get_format_filter_config()
-
+        filters = self.file_manager_view.get_current_filters()
         files = self.file_manager.select_directory_with_filter_and_sort(
-            self.file_manager.current_directory, recursive, resolution_filter, sort_config, format_filter
+            self.file_manager.current_directory, filters['recursive'],
+            filters['resolution'], filters['sort'], filters['format']
         )
         
         if files:
-            # 创建新的处理结果缓存，只保留仍然在文件列表中的已处理图片
+            # 保留仍在列表中的处理结果
             current_files_set = set(files)
-            preserved_results = {
-                input_path: output_path 
-                for input_path, output_path in self.processed_results.items() 
-                if input_path in current_files_set
+            self.processed_results = {
+                k: v for k, v in self.processed_results.items() if k in current_files_set
             }
-            self.processed_results = preserved_results
             
             self.load_image(files[0])
-            self.update_navigation_buttons()
-            self.update_file_count_label()
+            self.file_manager_view.update_navigation_buttons()
+            self.file_manager_view.update_file_count_label()
             
-            # 构建状态信息
             parts = [f"已重新加载 {len(files)} 个图片文件"]
-            if recursive:
+            if filters['recursive']:
                 parts.append("及其子目录")
-            if resolution_filter['enabled']:
-                parts.append(f"(分辨率≥{resolution_filter['min_width']}×{resolution_filter['min_height']})")
-            if format_filter:
-                format_name = self.format_filter_var.get().replace("仅", "")
-                parts.append(f"(仅{format_name}格式)")
-
-            status_text = "".join(parts)
-            self.status_label.config(text=status_text)
+            if filters['resolution']['enabled']:
+                parts.append(f"(分辨率≥{filters['resolution']['min_width']}×{filters['resolution']['min_height']})")
+            
+            self.status_bar.set_status("".join(parts))
         else:
-            # 没有文件时清空显示和缓存
             self.processed_results.clear()
             self.current_image_path = ""
-            self.file_path_var.set("")
-            self.original_label.config(image='', text="请选择图片文件")
-            self.original_resolution_label.config(text="")
-            self.processed_label.config(image='', text="等待处理")
-            self.processed_resolution_label.config(text="")
-            self.process_btn.config(state=tk.DISABLED)
-            self.prev_btn.config(state=tk.DISABLED)
-            self.next_btn.config(state=tk.DISABLED)
-            self.file_count_label.config(text="0/0")
-            self.batch_process_btn.config(state=tk.DISABLED)
-            
-            # 构建错误信息
-            error_parts = ["所选文件夹中没有找到支持的图片文件"]
-            if resolution_filter['enabled']:
-                error_parts.append(f"(分辨率要求≥{resolution_filter['min_width']}×{resolution_filter['min_height']})")
-            if format_filter:
-                format_name = self.format_filter_var.get().replace("仅", "")
-                error_parts.append(f"(格式要求: {format_name})")
-
-            self.status_label.config(text=" ".join(error_parts))
+            self.preview_manager.clear_all()
+            self.process_control.enable_processing(False)
+            self.process_control.enable_batch_processing(False)
+            self.status_bar.set_status("所选文件夹中没有找到支持的图片文件")
     
-    def get_resolution_filter_config(self):
-        """获取分辨率过滤配置"""
-        return {
-            'enabled': self.resolution_filter_var.get(),
-            'min_width': int(self.min_width_var.get()),
-            'min_height': int(self.min_height_var.get())
-        }
-    
-    def get_format_filter_config(self):
-        """获取图片格式筛选配置"""
-        format_map = {
-            "全部格式": None,
-            "仅JPEG": ['.jpg', '.jpeg'],
-            "仅PNG": ['.png'],
-            "仅BMP": ['.bmp'],
-            "仅GIF": ['.gif'],
-            "仅TIFF": ['.tiff'],
-            "仅WEBP": ['.webp']
-        }
-        selected = self.format_filter_var.get()
-        return format_map.get(selected, None)
-
-    def get_sort_config(self):
-        """获取排序配置"""
-        sort_option_map = {
-            "按文件大小(大到小)": "file_size_desc",
-            "按文件大小(小到大)": "file_size_asc",
-            "按分辨率宽度(大到小)": "width_desc", 
-            "按分辨率宽度(小到大)": "width_asc",
-            "按分辨率高度(大到小)": "height_desc",
-            "按分辨率高度(小到大)": "height_asc",
-            "按文件名(A-Z)": "filename_asc",
-            "按文件名(Z-A)": "filename_desc"
-        }
-        selected_option = self.sort_option_var.get()
-        return sort_option_map.get(selected_option, "file_size_desc")
-    
-    def load_resolution_filter_config(self):
-        """加载分辨率过滤配置"""
-        try:
-            filter_config = self.config.get_resolution_filter_config()
-            self.resolution_filter_var.set(filter_config['enabled'])
-            self.min_width_var.set(str(filter_config['min_width']))
-            self.min_height_var.set(str(filter_config['min_height']))
-        except Exception as e:
-            print(f"加载分辨率过滤配置失败: {e}")
-    
-    def save_resolution_filter_config(self):
-        """保存分辨率过滤配置"""
-        try:
-            filter_config = self.get_resolution_filter_config()
-            self.config.set_resolution_filter_config(
-                filter_config['enabled'],
-                filter_config['min_width'],
-                filter_config['min_height']
-            )
-            self.config.save_config()
-        except Exception as e:
-            print(f"保存分辨率过滤配置失败: {e}")
-    
-    def save_format_filter_config(self):
-        """保存格式筛选配置"""
-        try:
-            format_config = self.format_filter_var.get()
-            self.config.set('format_filter', format_config)
-            self.config.save_config()
-        except Exception as e:
-            print(f"保存格式筛选配置失败: {e}")
-
-    def load_format_filter_config(self):
-        """加载格式筛选配置"""
-        try:
-            format_config = self.config.get('format_filter', '全部格式')
-            self.format_filter_var.set(format_config)
-        except Exception as e:
-            print(f"加载格式筛选配置失败: {e}")
-
-    def save_sort_config(self):
-        """保存排序配置"""
-        try:
-            sort_config = self.get_sort_config()
-            self.config.set_sort_config(sort_config)
-            self.config.save_config()
-        except Exception as e:
-            print(f"保存排序配置失败: {e}")
-    
-    def load_sort_config(self):
-        """加载排序配置"""
-        try:
-            sort_config = self.config.get_sort_config()
-            # 将配置映射回UI显示文本
-            sort_option_map = {
-                "file_size_desc": "按文件大小(大到小)",
-                "file_size_asc": "按文件大小(小到大)", 
-                "width_desc": "按分辨率宽度(大到小)",
-                "width_asc": "按分辨率宽度(小到大)",
-                "height_desc": "按分辨率高度(大到小)",
-                "height_asc": "按分辨率高度(小到大)",
-                "filename_asc": "按文件名(A-Z)",
-                "filename_desc": "按文件名(Z-A)"
-            }
-            selected_option = sort_option_map.get(sort_config, "按文件大小(大到小)")
-            self.sort_option_var.set(selected_option)
-        except Exception as e:
-            print(f"加载排序配置失败: {e}")
-    
-    def load_image(self, image_path):
+    def load_image(self, image_path: str):
         """加载图片"""
         try:
             self.current_image_path = image_path
-            self.file_path_var.set(image_path)
+            self.file_manager_view.set_file_path(image_path)
             
             # 显示原图
-            self.display_image(image_path, self.original_label)
+            self.preview_manager.display_original(image_path)
             
-            # 检查是否有对应的处理结果
+            # 检查是否有处理结果
             if image_path in self.processed_results:
                 processed_path = self.processed_results[image_path]
                 if os.path.exists(processed_path):
-                    self.display_image(processed_path, self.processed_label)
+                    self.preview_manager.display_processed(processed_path)
                 else:
-                    # 处理结果文件不存在，清空预览
-                    self.processed_label.config(image='', text="处理结果文件不存在")
-                    self.processed_image_tk = None
-                    self.processed_resolution_label.config(text="")
-                    # 从缓存中移除
+                    self.preview_manager.clear_processed()
                     del self.processed_results[image_path]
             else:
-                # 没有处理结果，清空预览
-                self.processed_label.config(image='', text="等待处理")
-                self.processed_image_tk = None
-                self.processed_resolution_label.config(text="")
+                self.preview_manager.clear_processed()
             
             # 启用处理按钮
-            self.process_btn.config(state=tk.NORMAL)
+            self.process_control.enable_processing(True)
             
             # 更新状态
-            self.status_label.config(text=f"已加载: {os.path.basename(image_path)}")
+            self.status_bar.set_status(f"已加载: {os.path.basename(image_path)}")
             
         except Exception as e:
+            logger.error(f"加载图片失败: {image_path}, 错误: {e}")
             messagebox.showerror("加载失败", f"无法加载图片: {str(e)}")
-    
-    def get_image_info_text(self, image_path):
-        """获取图片信息文本（分辨率和文件大小）"""
-        try:
-            resolution = "未知分辨率"
-            file_size = "未知大小"
-            
-            # 获取图片信息
-            image_info = self.processor.get_image_info(image_path)
-            if image_info and 'width' in image_info and 'height' in image_info:
-                resolution = f"{image_info['width']} × {image_info['height']}"
-            
-            # 获取文件大小
-            if os.path.exists(image_path):
-                size_bytes = os.path.getsize(image_path)
-                if size_bytes < 1024:
-                    file_size = f"{size_bytes} B"
-                elif size_bytes < 1024 * 1024:
-                    file_size = f"{size_bytes // 1024} KB"
-                else:
-                    file_size = f"{size_bytes // (1024 * 1024):.1f} MB"
-            
-            return f"{resolution} | {file_size}"
-        except Exception:
-            return "信息获取失败"
-    
-    def display_image(self, image_path, label_widget):
-        """在指定标签中显示图片"""
-        try:
-            # 打开图片
-            pil_image = Image.open(image_path)
-            
-            # 获取标签大小
-            label_widget.update_idletasks()
-            label_width = label_widget.winfo_width()
-            label_height = label_widget.winfo_height()
-            
-            # 计算缩放比例
-            max_width, max_height = self.config.get_preview_size()
-            if label_width > 1 and label_height > 1:
-                max_width = min(max_width, label_width - 10)
-                max_height = min(max_height, label_height - 10)
-            
-            # 调整图片大小
-            pil_image.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
-            
-            # 转换为Tkinter格式
-            tk_image = ImageTk.PhotoImage(pil_image)
-            
-            # 显示图片
-            label_widget.config(image=tk_image, text="")
-            
-            # 保存引用防止被垃圾回收
-            if label_widget == self.original_label:
-                self.current_image_tk = tk_image
-            else:
-                self.processed_image_tk = tk_image
-            
-            # 更新图片信息显示（分辨率和文件大小）
-            info_text = self.get_image_info_text(image_path)
-            if label_widget == self.original_label:
-                self.original_resolution_label.config(text=info_text)
-            else:
-                self.processed_resolution_label.config(text=info_text)
-                
-        except Exception as e:
-            label_widget.config(image='', text=f"显示错误: {str(e)}")
-            # 清空信息显示
-            if label_widget == self.original_label:
-                self.original_resolution_label.config(text="")
-            else:
-                self.processed_resolution_label.config(text="")
-    
-    def show_previous_image(self):
-        """显示上一张图片"""
-        prev_file = self.file_manager.get_previous_file()
-        if prev_file:
-            self.load_image(prev_file)
-            self.update_file_count_label()
-    
-    def show_next_image(self):
-        """显示下一张图片"""
-        next_file = self.file_manager.get_next_file()
-        if next_file:
-            self.load_image(next_file)
-            self.update_file_count_label()
-    
-    def update_navigation_buttons(self):
-        """更新导航按钮状态"""
-        file_count = self.file_manager.get_file_count()
-        if file_count > 1:
-            self.prev_btn.config(state=tk.NORMAL)
-            self.next_btn.config(state=tk.NORMAL)
-        else:
-            self.prev_btn.config(state=tk.DISABLED)
-            self.next_btn.config(state=tk.DISABLED)
-    
-    def update_file_count_label(self):
-        """更新文件计数标签"""
-        current_index = self.file_manager.get_current_index()
-        total_count = self.file_manager.get_file_count()
-        self.file_count_label.config(text=f"{current_index + 1}/{total_count}")
-    
-    def on_process_type_change(self):
-        """处理方式变化时的处理"""
-        process_type = self.process_type_var.get()
-        if process_type == "resize":
-            self.create_resize_params()
-        elif process_type == "compress":
-            self.create_tinypng_params()
-        elif process_type == "pillow_compress":
-            self.create_pillow_compress_params()
-        else:
-            # 清空参数区域
-            for widget in self.params_frame.winfo_children():
-                widget.destroy()
-    
-    def on_resize_mode_change(self):
-        """调整方式变化时的处理"""
-        resize_mode = self.resize_mode_var.get()
-        if resize_mode == "percentage":
-            self.create_percentage_input()
-        else:
-            self.create_dimensions_input()
-    
-    def on_output_mode_change(self, *args):
-        """输出方式变化时的处理"""
-        output_mode = self.output_mode_var.get()
-        if output_mode == "custom_dir":
-            self.select_output_btn.config(state=tk.NORMAL)
-        else:
-            self.select_output_btn.config(state=tk.DISABLED)
-    
-    def select_output_directory(self):
-        """选择输出目录"""
-        directory_path = self.select_folder_dialog("选择输出目录")
-        if directory_path:
-            self.output_directory = directory_path
-            self.status_label.config(text=f"输出目录: {directory_path}")
-    
-    def get_process_params(self):
-        """获取处理参数"""
-        process_type = self.process_type_var.get()
-        
-        # 基础处理参数
-        if process_type == "resize":
-            resize_mode = self.resize_mode_var.get()
-            if resize_mode == "percentage":
-                resize_value = int(self.percentage_var.get())
-            else:
-                width = int(self.width_var.get())
-                height = int(self.height_var.get())
-                resize_value = (width, height)
-            
-            params = {
-                'resize_mode': resize_mode,
-                'resize_value': resize_value,
-                'quality': 85
-            }
-            
-            # 添加宽高比参数（仅在指定尺寸模式下有效）
-            if resize_mode == "dimensions":
-                params['maintain_aspect'] = self.maintain_aspect_var.get()
-            
-        elif process_type == "compress":
-            # 确保API密钥已设置
-            if hasattr(self, 'tinypng_api_key_var'):
-                api_key = self.tinypng_api_key_var.get().strip()
-                if api_key:
-                    # 更新处理器的API密钥
-                    self.processor.set_tinypng_api_key(api_key)
-                    params = {}
-                else:
-                    messagebox.showerror("API密钥错误", "请先输入TinyPNG API密钥")
-                    return None
-            else:
-                messagebox.showerror("API密钥错误", "请先输入TinyPNG API密钥")
-                return None
-        elif process_type == "pillow_compress":
-            # Pillow压缩参数
-            if hasattr(self, 'pillow_quality_var') and hasattr(self, 'pillow_mode_var'):
-                params = {
-                    'quality': int(self.pillow_quality_var.get()),
-                    'mode': self.pillow_mode_var.get()
-                }
-                
-                # 如果是缩放压缩模式，添加缩放参数
-                if self.pillow_mode_var.get() == "resize_optimize" and hasattr(self, 'pillow_scale_var'):
-                    params['scale'] = int(self.pillow_scale_var.get())
-            else:
-                messagebox.showerror("参数错误", "Pillow压缩参数设置错误")
-                return None
-        else:
-            params = {}
-        
-        # 如果未设置params（可能是TinyPNG压缩等情况），初始化为空字典
-        if 'params' not in locals():
-            params = {}
-        
-        # 添加输出格式选项（对所有处理方式都有效）
-        if hasattr(self, 'output_format_var'):
-            output_format = self.output_format_var.get()
-            if output_format != "保持原格式":
-                params['output_format'] = output_format
-                # 为支持质量的格式添加默认质量参数
-                if output_format in ["JPEG", "WEBP"] and 'quality' not in params:
-                    params['quality'] = 85
-        
-        # 添加Meta覆盖选项
-        if hasattr(self, 'meta_override_var'):
-            params['meta_override'] = self.meta_override_var.get()
-        
-        return params
     
     def process_image(self):
         """处理当前图片"""
@@ -1303,13 +300,10 @@ class ImageProcessorGUI:
             messagebox.showwarning("正在处理", "请等待当前处理完成")
             return
         
-        # 获取处理参数
-        process_params = self.get_process_params()
+        process_params = self.process_control.get_process_params()
         if process_params is None:
-            # API密钥验证失败，停止处理
             return
         
-        # 在新线程中处理图片
         self.processing_thread = threading.Thread(
             target=self._process_image_thread,
             args=(self.current_image_path, process_params)
@@ -1319,60 +313,42 @@ class ImageProcessorGUI:
     def _process_image_thread(self, image_path, process_params):
         """处理图片的线程函数"""
         self.is_processing = True
-        self.process_btn.config(state=tk.DISABLED)
-        self.stop_btn.config(state=tk.NORMAL)
+        self.process_control.set_processing_state(True)
         
         try:
-            process_type = self.process_type_var.get()
-            output_mode = self.output_mode_var.get()
+            process_type = self.process_control.get_process_type()
+            output_mode = self.process_control.get_output_mode()
             
-            # 获取输出格式
-            output_format = process_params.get('output_format') if hasattr(self, 'output_format_var') else None
+            output_format = process_params.get('output_format')
             
-            # 获取输出路径
-            if output_mode == "custom_dir" and hasattr(self, 'output_directory'):
-                output_path = self.file_manager.get_output_path(
-                    image_path, output_mode, self.output_directory, output_format
-                )
-            else:
-                output_path = self.file_manager.get_output_path(image_path, output_mode, None, output_format)
+            output_dir = self.process_control.get_output_directory() if output_mode == "custom_dir" else None
+            output_path = self.file_manager.get_output_path(image_path, output_mode, output_dir, output_format)
             
-            # 创建备份（如果是覆盖模式）
             if output_mode == "overwrite":
                 self.file_manager.create_backup(image_path)
             
-            # 更新状态
-            self.root.after(0, lambda: self.status_label.config(text="正在处理..."))
+            self.root.after(0, lambda: self.status_bar.set_status("正在处理..."))
             
-            # 处理图片
             result = self.processor.process_single_image(
                 image_path, output_path, process_type, process_params
             )
             
-            # 在主线程中更新UI
             self.root.after(0, lambda: self.on_process_complete(result, output_path))
             
         except Exception as e:
+            logger.exception(f"处理图片时发生错误: {image_path}")
             self.root.after(0, lambda: self.on_process_error(str(e)))
         
         finally:
             self.is_processing = False
-            self.root.after(0, lambda: self.process_btn.config(state=tk.NORMAL))
-            self.root.after(0, lambda: self.stop_btn.config(state=tk.DISABLED))
-            # 重新启用批量处理按钮
-            if self.file_manager.get_file_count() > 0:
-                self.root.after(0, lambda: self.batch_process_btn.config(state=tk.NORMAL))
+            self.root.after(0, lambda: self.process_control.set_processing_state(False))
     
     def on_process_complete(self, result, output_path):
-        """处理完成时的回调"""
+        """处理完成回调"""
         if result['success']:
-            # 保存处理结果到缓存
             self.processed_results[self.current_image_path] = output_path
+            self.preview_manager.display_processed(output_path)
             
-            # 显示处理后的图片
-            self.display_image(output_path, self.processed_label)
-            
-            # 显示结果信息
             input_size = result['input_size']
             output_size = result['output_size']
             compression_ratio = result.get('compression_ratio', 0)
@@ -1381,21 +357,16 @@ class ImageProcessorGUI:
             if compression_ratio > 0:
                 info_text += f", 压缩率: {compression_ratio:.1f}%"
             
-            self.status_label.config(text=info_text)
+            self.status_bar.set_status(info_text)
             messagebox.showinfo("处理完成", info_text)
         else:
-            self.status_label.config(text="处理失败")
+            self.status_bar.set_status("处理失败")
             messagebox.showerror("处理失败", result.get('error', '未知错误'))
     
     def on_process_error(self, error_message):
-        """处理错误时的回调"""
-        self.status_label.config(text="处理失败")
+        """处理错误回调"""
+        self.status_bar.set_status("处理失败")
         messagebox.showerror("处理错误", error_message)
-    
-    def stop_processing(self):
-        """停止处理"""
-        self.processor.stop_all_processing()
-        self.status_label.config(text="正在停止...")
     
     def batch_process_images(self):
         """批量处理图片"""
@@ -1408,23 +379,13 @@ class ImageProcessorGUI:
             messagebox.showwarning("正在处理", "请等待当前处理完成")
             return
         
-        # 获取处理参数
-        process_params = self.get_process_params()
+        process_params = self.process_control.get_process_params()
         if process_params is None:
-            # API密钥验证失败，停止处理
             return
         
-        # 确认批量处理
-        result = messagebox.askyesno(
-            "确认批量处理", 
-            f"确定要处理 {len(files)} 个图片文件吗？"
-        )
-        
+        result = messagebox.askyesno("确认批量处理", f"确定要处理 {len(files)} 个图片文件吗？")
         if result:
-            # 设置进度回调
             self.processor.set_processing_callback(self.on_batch_progress)
-            
-            # 在新线程中批量处理
             self.processing_thread = threading.Thread(
                 target=self._batch_process_thread,
                 args=(files, process_params)
@@ -1432,55 +393,47 @@ class ImageProcessorGUI:
             self.processing_thread.start()
     
     def _batch_process_thread(self, files, process_params):
-        """批量处理的线程函数"""
+        """批量处理线程函数"""
         self.is_processing = True
-        self.process_btn.config(state=tk.DISABLED)
-        self.batch_process_btn.config(state=tk.DISABLED)
-        self.stop_btn.config(state=tk.NORMAL)
+        self.process_control.set_processing_state(True)
         
         try:
-            process_type = self.process_type_var.get()
-            output_mode = self.output_mode_var.get()
+            process_type = self.process_control.get_process_type()
+            output_mode = self.process_control.get_output_mode()
+            output_dir = self.process_control.get_output_directory() if output_mode == "custom_dir" else None
             
-            output_dir = None
-            if output_mode == "custom_dir" and hasattr(self, 'output_directory'):
-                output_dir = self.output_directory
-            
-            # 批量处理
             results = self.processor.process_multiple_images(
                 files, output_mode, process_type, process_params, output_dir
             )
             
-            # 在主线程中显示结果
             self.root.after(0, lambda: self.on_batch_process_complete(results))
             
         except Exception as e:
+            logger.exception("批量处理时发生错误")
             self.root.after(0, lambda: self.on_batch_process_error(str(e)))
         
         finally:
             self.is_processing = False
-            self.root.after(0, lambda: self.process_btn.config(state=tk.NORMAL))
-            self.root.after(0, lambda: self.batch_process_btn.config(state=tk.NORMAL))
-            self.root.after(0, lambda: self.stop_btn.config(state=tk.DISABLED))
-            self.root.after(0, lambda: self.progress_var.set(0))
+            self.root.after(0, lambda: self.process_control.set_processing_state(False))
+            self.root.after(0, lambda: self.status_bar.reset_progress())
     
     def on_batch_progress(self, file_path, current, total):
         """批量处理进度回调"""
         progress = (current / total) * 100
-        self.progress_var.set(progress)
-        self.status_label.config(text=f"正在处理: {os.path.basename(file_path)} ({current}/{total})")
+        self.status_bar.set_progress(progress)
+        self.status_bar.set_status(f"正在处理: {os.path.basename(file_path)} ({current}/{total})")
     
     def on_batch_process_complete(self, results):
-        """批量处理完成时的回调"""
+        """批量处理完成回调"""
         success_count = sum(1 for r in results if r['success'])
         total_count = len(results)
         
-        # 保存所有成功的处理结果到缓存
+        # 保存处理结果
         for result in results:
             if result['success'] and result.get('output_path') and result.get('input_path'):
                 self.processed_results[result['input_path']] = result['output_path']
         
-        # 计算压缩统计信息
+        # 计算统计信息
         total_input_size = 0
         total_output_size = 0
         successful_results = [r for r in results if r['success'] and r.get('input_size', 0) > 0]
@@ -1489,76 +442,64 @@ class ImageProcessorGUI:
             total_input_size += result.get('input_size', 0)
             total_output_size += result.get('output_size', 0)
         
-        # 构建弹窗和状态栏的详细消息内容
-        message_lines = []
-        message_lines.append(f"批量处理完成！")
-        message_lines.append(f"成功: {success_count}/{total_count}")
+        from utils.common_utils import format_file_size
+        
+        message_lines = [f"批量处理完成！", f"成功: {success_count}/{total_count}"]
         if success_count < total_count:
             message_lines.append(f"失败: {total_count - success_count}")
         message_lines.append("")
-
+        
         status_summary_parts = [f"批量处理完成! 成功: {success_count}/{total_count}"]
         
         if successful_results and total_input_size > 0:
             saved_size = total_input_size - total_output_size
             saved_percentage = (saved_size / total_input_size) * 100
             
-            # 弹窗信息
             message_lines.append("压缩统计：")
-            message_lines.append(f"原始总大小: {self._format_file_size(total_input_size)}")
-            message_lines.append(f"压缩后总大小: {self._format_file_size(total_output_size)}")
-            message_lines.append(f"节省空间: {self._format_file_size(saved_size)}")
+            message_lines.append(f"原始总大小: {format_file_size(total_input_size)}")
+            message_lines.append(f"压缩后总大小: {format_file_size(total_output_size)}")
+            message_lines.append(f"节省空间: {format_file_size(saved_size)}")
             message_lines.append(f"压缩比例: {saved_percentage:.1f}%")
             
-            # 状态栏信息
-            status_summary_parts.append(f"总大小: {self._format_file_size(total_input_size)} -> {self._format_file_size(total_output_size)}")
-            status_summary_parts.append(f"节省: {self._format_file_size(saved_size)} ({saved_percentage:.1f}%)")
-        else:
-            message_lines.append("没有成功处理的文件")
+            status_summary_parts.append(f"总大小: {format_file_size(total_input_size)} -> {format_file_size(total_output_size)}")
+            status_summary_parts.append(f"节省: {format_file_size(saved_size)} ({saved_percentage:.1f}%)")
         
-        # 设置状态栏和弹窗消息
         summary = "\n".join(message_lines)
         status_summary_text = " | ".join(status_summary_parts)
-        self.status_label.config(text=status_summary_text)
+        self.status_bar.set_status(status_summary_text)
         
-        # 找到第一个成功处理的文件并在预览窗口中显示
+        # 显示第一个成功的处理结果
         for result in results:
             if result['success'] and result.get('output_path'):
-                try:
-                    # 如果当前显示的原图与这个处理结果匹配，则显示处理后的图片
-                    if (self.current_image_path and 
-                        result['input_path'] == self.current_image_path):
-                        self.display_image(result['output_path'], self.processed_label)
-                    elif not self.current_image_path:
-                        # 如果没有当前图片，加载第一个成功处理的原图并显示结果
-                        self.load_image(result['input_path'])
-                        self.display_image(result['output_path'], self.processed_label)
+                if self.current_image_path and result['input_path'] == self.current_image_path:
+                    self.preview_manager.display_processed(result['output_path'])
                     break
-                except Exception as e:
-                    print(f"无法显示处理结果: {e}")
-                    continue
         
         messagebox.showinfo("批量处理完成", summary)
     
-    def _format_file_size(self, size_bytes):
-        """格式化文件大小显示
-        
-        Args:
-            size_bytes: 文件大小（字节）
-            
-        Returns:
-            str: 格式化后的文件大小字符串
-        """
-        if size_bytes < 1024:
-            return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024:
-            return f"{size_bytes / 1024:.1f} KB"
-        elif size_bytes < 1024 * 1024 * 1024:
-            return f"{size_bytes / (1024 * 1024):.1f} MB"
-        else:
-            return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
-    
     def on_batch_process_error(self, error_message):
-        """批量处理错误时的回调"""
-        self.status_label.config(text="批量处理失败")
+        """批量处理错误回调"""
+        self.status_bar.set_status("批量处理失败")
         messagebox.showerror("批量处理错误", error_message)
+    
+    # 连接处理控制管理器的处理方法
+    def connect_process_control(self):
+        """连接处理控制管理器的方法"""
+        # 替换process_control中的占位方法
+        self.process_control.process_image = self.process_image
+        self.process_control.batch_process_images = self.batch_process_images
+
+
+# 在__init__末尾调用连接方法
+def _finalize_init(self):
+    """完成初始化"""
+    self.connect_process_control()
+
+# 将finalize方法添加到__init__中
+ImageProcessorGUI._original_init = ImageProcessorGUI.__init__
+
+def _new_init(self, root, config):
+    self._original_init(root, config)
+    self.connect_process_control()
+
+ImageProcessorGUI.__init__ = _new_init

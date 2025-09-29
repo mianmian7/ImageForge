@@ -11,6 +11,9 @@ from typing import Dict, List, Optional, Callable, Any
 from utils.pillow_wrapper import PillowWrapper
 from utils.tinypng_client import TinyPNGClient
 from core.file_manager import FileManager
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 class ImageProcessor:
     """图片处理核心类"""
@@ -611,12 +614,12 @@ class ImageProcessor:
                     try:
                         os.remove(input_meta_path)
                     except Exception as e:
-                        print(f"删除原meta文件失败: {e}")
+                        logger.warning(f"删除原meta文件失败: {e}")
                 
                 return True
             
         except Exception as e:
-            print(f"处理meta文件失败: {e}")
+            logger.error(f"处理meta文件失败: {e}")
             return False
     
     def _scale_meta_coordinates(self, meta_data: dict, scale_factor: float):
@@ -691,7 +694,7 @@ class ImageProcessor:
                                     )
                                     
         except Exception as e:
-            print(f"缩放meta坐标失败: {e}")
+            logger.error(f"缩放meta坐标失败: {e}")
     
     def _get_scale_factor(self, process_type: str, process_params: Dict[str, Any]) -> float:
         """根据处理类型和参数获取缩放比例
