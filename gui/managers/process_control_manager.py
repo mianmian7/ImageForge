@@ -139,16 +139,16 @@ class ProcessControlManager:
         button_frame = ttk.Frame(self.control_frame)
         button_frame.pack(fill=tk.X)
         
-        self.process_btn = ttk.Button(button_frame, text="处理图片", 
-                                     command=self.process_image, state=tk.DISABLED)
+        self.process_btn = ttk.Button(button_frame, text="处理图片",
+                                     command=lambda: self.process_image(), state=tk.DISABLED)
         self.process_btn.pack(side=tk.LEFT, padx=(0, 10))
-        
-        self.stop_btn = ttk.Button(button_frame, text="停止处理", 
-                                  command=self.stop_processing, state=tk.DISABLED)
+
+        self.stop_btn = ttk.Button(button_frame, text="停止处理",
+                                  command=lambda: self.stop_processing(), state=tk.DISABLED)
         self.stop_btn.pack(side=tk.LEFT, padx=(0, 10))
-        
-        self.batch_process_btn = ttk.Button(button_frame, text="批量处理", 
-                                           command=self.batch_process_images, state=tk.DISABLED)
+
+        self.batch_process_btn = ttk.Button(button_frame, text="批量处理",
+                                           command=lambda: self.batch_process_images(), state=tk.DISABLED)
         self.batch_process_btn.pack(side=tk.LEFT, padx=(10, 0))
         
         # 输出格式选择
@@ -493,13 +493,11 @@ class ProcessControlManager:
         return params
     
     def process_image(self):
-        """处理当前图片"""
-        # 此方法需要由主窗口提供当前图片路径
+        """处理当前图片（占位方法，由主窗口连接）"""
         pass
     
     def batch_process_images(self):
-        """批量处理图片"""
-        # 此方法需要由主窗口提供文件列表
+        """批量处理图片（占位方法，由主窗口连接）"""
         pass
     
     def stop_processing(self):

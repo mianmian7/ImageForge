@@ -62,7 +62,7 @@ class ImageProcessorGUI:
         
         # 加载配置
         self.file_manager_view.load_configurations()
-    
+
     def _init_managers(self):
         """初始化所有管理器"""
         # 创建主框架
@@ -140,6 +140,9 @@ class ImageProcessorGUI:
             left_frame, self.config, self.processor, self.file_manager
         )
         self.process_control.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+
+        # 立即连接处理方法（必须在创建后立即连接，避免后续操作触发未连接的方法）
+        self.connect_process_control()
     
     def create_asset_cleaner_panel(self):
         """创建资源清理面板"""
@@ -482,24 +485,8 @@ class ImageProcessorGUI:
         self.status_bar.set_status("批量处理失败")
         messagebox.showerror("批量处理错误", error_message)
     
-    # 连接处理控制管理器的处理方法
     def connect_process_control(self):
-        """连接处理控制管理器的方法"""
-        # 替换process_control中的占位方法
+        """连接处理控制管理器的处理方法"""
+        # 替换process_control中的占位方法，使按钮能够调用主窗口的处理逻辑
         self.process_control.process_image = self.process_image
         self.process_control.batch_process_images = self.batch_process_images
-
-
-# 在__init__末尾调用连接方法
-def _finalize_init(self):
-    """完成初始化"""
-    self.connect_process_control()
-
-# 将finalize方法添加到__init__中
-ImageProcessorGUI._original_init = ImageProcessorGUI.__init__
-
-def _new_init(self, root, config):
-    self._original_init(root, config)
-    self.connect_process_control()
-
-ImageProcessorGUI.__init__ = _new_init
